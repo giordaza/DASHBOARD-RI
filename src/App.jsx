@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+
 // =============================================================
 //  UTILIDADES
 // =============================================================
+
 const norm = (v) => String(v ?? '').trim().toUpperCase();
+
 // Parseo numérico tolerante a comas decimales / miles (Excel en español)
 const parseNum = (v) => {
     if (v === undefined || v === null || v === '') return 0;
@@ -12,6 +15,7 @@ const parseNum = (v) => {
     const n = parseFloat(s);
     return isFinite(n) ? n : 0;
 };
+
 // Coordenadas: aceptan número o texto con coma decimal (ej. "4,5399684")
 const parseCoord = (v) => {
     if (typeof v === 'number') return isFinite(v) ? v : NaN;
@@ -21,11 +25,13 @@ const parseCoord = (v) => {
     const n = parseFloat(s);
     return isFinite(n) ? n : NaN;
 };
+
 const parseIntSafe = (v) => {
     if (typeof v === 'number') return Math.round(v);
     const n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
     return isFinite(n) ? n : 0;
 };
+
 // Diccionario de columnas. Cubre AMBOS archivos y hoja de eliminados
 const F = {
     lat:        ['LATITUD', 'LATITUD ', 'Latitud', 'LAT'],
@@ -36,21 +42,32 @@ const F = {
     supervisor: ['SUPERVISOR', 'NOMBRE SUPERVISOR ', 'NOMBRE SUPERVISOR', 'USUARIO SUPERVISOR', 'Supervisor'],
     actividad:  ['ACTIVIDAD', 'ACTIVIDAD ', 'Actividad', 'TIPO ACTIVIDAD', 'Tipo Actividad', 'ACTIVIDAD VYM'],
     pdv:        ['PUNTO DE VENTA', 'PUNTO DE VENTA ', 'Punto de Venta'],
-    codigo:     ['Codigo  PDV', 'Codigo PDV', 'CODIGO PDV', 'Código PDV', 'CÓDIGO PDV', 'ID', 'Id'], // Añadido ID
-    cadena:     ['CRUCE', 'CADENA', 'SUBCADENA', 'Cadena', 'TIPO CLIENTE'], // Añadido TIPO CLIENTE
+    codigo:     ['ID', 'Id', 'Codigo  PDV', 'Codigo PDV', 'CODIGO PDV', 'Código PDV', 'CÓDIGO PDV'], // Prioridad a ID
+    cadena:     ['CADENA', 'SUBCADENA', 'Cadena', 'TIPO CLIENTE'], 
     frecuencia: ['FRECUENCIA', 'FRECUENCIA ', 'Frecuencia'],
     hrs:        ['TOTAL HRS B', 'Total Hrs B', 'HRS B', 'HRS', 'Hrs'],
     desp:       ['DESPLAZAMIENTO', 'TOTAL TIEMPO DEZPLASAMIENTO', 'TOTAL TIEMPO DESPLAZAMIENTO', 'TIEMPO DESPLAZAMIENTO', 'Desplazamiento'],
     decil:      ['DECIL', 'Decil', 'decil'],
-    impTotal:   ['IMP TOTAL', 'Imp Total', 'IMP', 'IMPORTE TOTAL', 'Imp total'],
+    impTotal:   ['IMP TOTAL', 'Imp Total', 'IMP', 'IMPORTE TOTAL', 'Imp total', 'IMPORTE', 'PONDERADO'],
 };
+
 const get = (row, keys) => {
     if (!row) return undefined;
+    const rowKeys = Object.keys(row);
     for (const k of keys) {
-        if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') return row[k];
+        // Limpiamos de espacios dobles y bordes tanto la llave buscada como la de Excel
+        const target = k.trim().toUpperCase().replace(/\s+/g, ' ');
+        const foundKey = rowKeys.find(rk => rk.trim().toUpperCase().replace(/\s+/g, ' ') === target);
+        if (foundKey) {
+            const val = row[foundKey];
+            if (val !== undefined && val !== null && String(val).trim() !== '') {
+                return val;
+            }
+        }
     }
     return undefined;
 };
+
 // Fallback de color (rutas sin entrada en la paleta)
 const stringToColor = (str) => {
     if (!str) return '#94a3b8';
@@ -61,6 +78,7 @@ const stringToColor = (str) => {
     for (let i = 0; i < 3; i++) color += ('00' + ((hash >> (i * 8)) & 0xFF).toString(16)).substr(-2);
     return color;
 };
+
 // Paleta estable y bien diferenciada para N usuarios/rutas
 const buildColorMap = (routes) => {
     const sorted = [...new Set(routes.map((r) => String(r).trim()).filter(Boolean))]
@@ -75,16 +93,20 @@ const buildColorMap = (routes) => {
     });
     return map;
 };
+
 // ¿La fila cumple los filtros indicados?
 const rowMatches = (row, f) => {
     if (f.CIUDAD && norm(get(row, F.ciudad)) !== norm(f.CIUDAD)) return false;
     if (f.REGIONAL && norm(get(row, F.regional)) !== norm(f.REGIONAL)) return false;
+    if (f.CADENA && norm(get(row, F.cadena)) !== norm(f.CADENA)) return false; 
     if (f.RUTA && norm(get(row, F.ruta)) !== norm(f.RUTA)) return false;
     if (f.SUPERVISOR && norm(get(row, F.supervisor)) !== norm(f.SUPERVISOR)) return false;
     if (f.ACTIVIDAD && norm(get(row, F.actividad)) !== norm(f.ACTIVIDAD)) return false;
     return true;
 };
-const FIELD_KEYS = { CIUDAD: F.ciudad, REGIONAL: F.regional, RUTA: F.ruta, SUPERVISOR: F.supervisor, ACTIVIDAD: F.actividad };
+
+const FIELD_KEYS = { CIUDAD: F.ciudad, REGIONAL: F.regional, CADENA: F.cadena, RUTA: F.ruta, SUPERVISOR: F.supervisor, ACTIVIDAD: F.actividad };
+
 // Opciones de un filtro (en cascada con los demás filtros activos del MISMO lado)
 const optionsFor = (baseRows, filters, field) => {
     const others = { ...filters, [field]: '' };
@@ -95,6 +117,7 @@ const optionsFor = (baseRows, filters, field) => {
     });
     return [...set].sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
 };
+
 // Aplica filtros a un lado (base + desplazamiento) de forma independiente
 const filterSide = (base, desp, filters) => {
     const anyActive = Object.values(filters).some(Boolean);
@@ -104,8 +127,8 @@ const filterSide = (base, desp, filters) => {
     const d = (desp || []).filter((r) => allowed.has(norm(get(r, F.ruta))));
     return { base: b, desp: d };
 };
-// Resumen por ruta (idéntico para ambos lados). El desplazamiento sale de la
-// hoja dedicada si existe; si no, de la columna DESPLAZAMIENTO de la base.
+
+// Resumen por ruta (idéntico para ambos lados).
 const computeRouteSummary = (baseRows, despRows, colorMap) => {
     const grouped = {};
     (baseRows || []).forEach((row) => {
@@ -113,7 +136,13 @@ const computeRouteSummary = (baseRows, despRows, colorMap) => {
         if (!r) return;
         if (!grouped[r]) grouped[r] = { hrsServ: 0, desp: 0, pdv: 0, frec: 0 };
         grouped[r].hrsServ += parseNum(get(row, F.hrs));
-        grouped[r].pdv += 1;
+        
+        // CONTEO MEDIANTE COLUMNA ID (Evita sumar vacíos)
+        const idVal = get(row, F.codigo);
+        if (idVal !== undefined && String(idVal).trim() !== '') {
+            grouped[r].pdv += 1;
+        }
+
         grouped[r].frec += parseIntSafe(get(row, F.frecuencia));
     });
     const despSource = (despRows && despRows.length) ? despRows : baseRows;
@@ -130,12 +159,12 @@ const computeRouteSummary = (baseRows, despRows, colorMap) => {
         })
         .sort((a, b) => b.total - a.total);
 };
-// Resumen por REGIONAL (para el comparativo). El % de ocupación es el promedio
-// por cupo de la regional: (servicio + desplazamiento) / (cupos * 168).
+
+// Resumen por REGIONAL (para el comparativo).
 const computeRegionalSummary = (baseRows, despRows) => {
     const grouped = {};
     const ensure = (reg) => {
-        if (!grouped[reg]) grouped[reg] = { hrsServ: 0, desp: 0, pdv: 0, frec: 0, rutas: new Set() };
+        if (!grouped[reg]) grouped[reg] = { hrsServ: 0, desp: 0, pdv: 0, frec: 0, imp: 0, rutas: new Set() };
         return grouped[reg];
     };
     const routeToReg = {};
@@ -143,19 +172,24 @@ const computeRegionalSummary = (baseRows, despRows) => {
         const reg = String(get(row, F.regional) ?? '').trim() || 'Sin Regional';
         const g = ensure(reg);
         g.hrsServ += parseNum(get(row, F.hrs));
-        g.pdv += 1;
+        
+        // CONTEO MEDIANTE COLUMNA ID (Evita sumar vacíos)
+        const idVal = get(row, F.codigo);
+        if (idVal !== undefined && String(idVal).trim() !== '') {
+            g.pdv += 1;
+        }
+        
         g.frec += parseIntSafe(get(row, F.frecuencia));
+        g.imp += parseNum(get(row, F.impTotal)); 
         const r = norm(get(row, F.ruta));
         if (r) { g.rutas.add(r); routeToReg[r] = reg; }
     });
     if (despRows && despRows.length) {
-        // hoja de desplazamiento aparte: se atribuye a la regional según la ruta
         despRows.forEach((row) => {
             const reg = routeToReg[norm(get(row, F.ruta))] || 'Sin Regional';
             ensure(reg).desp += parseNum(get(row, F.desp));
         });
     } else {
-        // desplazamiento viene en la misma base (columna por PDV)
         (baseRows || []).forEach((row) => {
             const reg = String(get(row, F.regional) ?? '').trim() || 'Sin Regional';
             ensure(reg).desp += parseNum(get(row, F.desp));
@@ -165,12 +199,12 @@ const computeRegionalSummary = (baseRows, despRows) => {
         .map(([reg, v]) => {
             const cupos = v.rutas.size || 1;
             const total = v.hrsServ + v.desp;
-            return { reg, pdv: v.pdv, frec: v.frec, hrsServ: v.hrsServ, desp: v.desp, cupos, pctProm: (total / (cupos * 168)) * 100 };
+            return { reg, pdv: v.pdv, frec: v.frec, hrsServ: v.hrsServ, desp: v.desp, imp: v.imp, cupos, pctProm: (total / (cupos * 168)) * 100 };
         })
         .sort((a, b) => b.pdv - a.pdv);
 };
-// Comparativo de PDV ELIMINADOS por REGIONAL: base nueva (cubiertos) vs ids eliminados.
-// Ambas fuentes contienen la columna "REGIONAL VYM" (cubierta por F.regional).
+
+// Comparativo de PDV ELIMINADOS por REGIONAL
 const computeEliminadosPorRegional = (baseNuevas, eliminados) => {
     const grouped = {};
     const ensure = (reg) => {
@@ -178,12 +212,18 @@ const computeEliminadosPorRegional = (baseNuevas, eliminados) => {
         return grouped[reg];
     };
     (baseNuevas || []).forEach((row) => {
-        const reg = String(get(row, F.regional) ?? '').trim() || 'Sin Regional';
-        ensure(reg).cubiertos += 1;
+        const idVal = get(row, F.codigo);
+        if (idVal !== undefined && String(idVal).trim() !== '') {
+            const reg = String(get(row, F.regional) ?? '').trim() || 'Sin Regional';
+            ensure(reg).cubiertos += 1;
+        }
     });
     (eliminados || []).forEach((row) => {
-        const reg = String(get(row, F.regional) ?? '').trim() || 'Sin Regional';
-        ensure(reg).eliminados += 1;
+        const idVal = get(row, F.codigo);
+        if (idVal !== undefined && String(idVal).trim() !== '') {
+            const reg = String(get(row, F.regional) ?? '').trim() || 'Sin Regional';
+            ensure(reg).eliminados += 1;
+        }
     });
     return Object.entries(grouped)
         .map(([reg, v]) => {
@@ -198,8 +238,8 @@ const computeEliminadosPorRegional = (baseNuevas, eliminados) => {
         })
         .sort((a, b) => b.eliminados - a.eliminados);
 };
-// Clasifica cada hoja del Excel: lado (anterior/nuevo) y si es hoja de desplazamiento.
-// Usa el nombre y, como respaldo, las columnas (más robusto).
+
+// Clasifica cada hoja del Excel
 const classifySheet = (name, rows) => {
     const U = String(name).toUpperCase();
     const keys = rows && rows[0] ? Object.keys(rows[0]).map((k) => k.toUpperCase().trim()) : [];
@@ -215,9 +255,11 @@ const classifySheet = (name, rows) => {
     }
     return { side, isDespSheet };
 };
+
 // =============================================================
-//  MAPA (Leaflet) — cada lado usa SUS PROPIAS coordenadas
+//  MAPA (Leaflet)
 // =============================================================
+
 const MapComponent = ({ data, colorMap }) => {
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
@@ -260,11 +302,13 @@ const MapComponent = ({ data, colorMap }) => {
     }, [data, colorMap]);
     return <div ref={mapRef} className="w-full h-full bg-slate-100 z-0 relative" />;
 };
+
 // =============================================================
-//  BARRA DE FILTROS (independiente por lado)
+//  BARRA DE FILTROS
 // =============================================================
+
 function FilterBar({ title, subtitle, accent = '', baseRows, filters, setFilters }) {
-    const fields = ['CIUDAD', 'REGIONAL', 'RUTA', 'SUPERVISOR', 'ACTIVIDAD'];
+    const fields = ['CIUDAD', 'REGIONAL', 'CADENA', 'RUTA', 'SUPERVISOR', 'ACTIVIDAD'];
     const active = Object.values(filters).filter(Boolean).length;
     const disabled = !baseRows || baseRows.length === 0;
     return (
@@ -275,14 +319,14 @@ function FilterBar({ title, subtitle, accent = '', baseRows, filters, setFilters
                     {subtitle && <p className="text-[11px] text-slate-400">{subtitle}</p>}
                 </div>
                 <button
-                    onClick={() => setFilters({ CIUDAD: '', REGIONAL: '', RUTA: '', SUPERVISOR: '', ACTIVIDAD: '' })}
+                    onClick={() => setFilters({ CIUDAD: '', REGIONAL: '', CADENA: '', RUTA: '', SUPERVISOR: '', ACTIVIDAD: '' })}
                     disabled={active === 0}
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                 >
                     Limpiar {active > 0 ? `(${active})` : ''}
                 </button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
                 {fields.map((field) => (
                     <div key={field} className="flex flex-col gap-1 min-w-0">
                         <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{field}</label>
@@ -301,7 +345,7 @@ function FilterBar({ title, subtitle, accent = '', baseRows, filters, setFilters
         </div>
     );
 }
-// Logo Haleon
+
 function HaleonLogo({ h = 24 }) {
     const [ok, setOk] = useState(true);
     if (ok) {
@@ -320,7 +364,7 @@ function HaleonLogo({ h = 24 }) {
         </span>
     );
 }
-// Lockup de logos
+
 function Logos({ h = 32 }) {
     return (
         <div className="flex items-center gap-3">
@@ -330,28 +374,43 @@ function Logos({ h = 32 }) {
         </div>
     );
 }
+
 // =============================================================
 //  COMPONENTE PRINCIPAL
 // =============================================================
+
 function Dashboard({ scriptsLoaded, onHome }) {
     const [status, setStatus] = useState('Esperando archivo Excel...');
     const [isLoading, setIsLoading] = useState(false);
     const [dataState, setDataState] = useState({ bNuevas: [], dNuevas: [], bViejas: [], dViejas: [], eliminados: [] });
     const [autoLoaded, setAutoLoaded] = useState(false);
-    const emptyFilters = { CIUDAD: '', REGIONAL: '', RUTA: '', SUPERVISOR: '', ACTIVIDAD: '' };
+    
+    const emptyFilters = { CIUDAD: '', REGIONAL: '', CADENA: '', RUTA: '', SUPERVISOR: '', ACTIVIDAD: '' };
+    
     const [filtersA, setFiltersA] = useState(emptyFilters);
     const [filtersN, setFiltersN] = useState(emptyFilters);
  
-    // Filtro específico para la tabla del directorio general
     const [coberturaFilter, setCoberturaFilter] = useState('cubiertos'); // 'cubiertos' | 'eliminados' | 'todos'
+
     // --- Procesa el Excel en crudo (centralizado) ---
     const processExcelBuffer = (buffer) => {
         const wb = window.XLSX.read(buffer, { type: 'array' });
         const raw = { bNuevas: [], dNuevas: [], bViejas: [], dViejas: [], eliminados: [] };
  
         wb.SheetNames.forEach((sn) => {
-            const sd = window.XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' });
+            let sd = window.XLSX.utils.sheet_to_json(wb.Sheets[sn], { defval: '' });
             if (!sd.length) return;
+
+            // CORRECCIÓN: Filtramos las filas fantasma vacías y filas de "TOTALES"
+            sd = sd.filter(row => {
+                const vals = Object.values(row).map(v => String(v).trim().toUpperCase());
+                if (vals.some(v => v === 'TOTAL' || v === 'TOTALES' || v.startsWith('TOTAL '))) {
+                    return false;
+                }
+                return get(row, F.pdv) || get(row, F.codigo) || get(row, F.ruta);
+            });
+            if (!sd.length) return;
+
             const U = String(sn).toUpperCase();
  
             // Detectar la hoja nueva de eliminados
@@ -372,8 +431,9 @@ function Dashboard({ scriptsLoaded, onHome }) {
         setDataState(raw);
         setFiltersA(emptyFilters);
         setFiltersN(emptyFilters);
-        setCoberturaFilter('cubiertos'); // Reset al cargar
+        setCoberturaFilter('cubiertos');
     };
+
     // --- Auto-carga del Excel ---
     useEffect(() => {
         if (!scriptsLoaded || autoLoaded) return;
@@ -398,6 +458,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
         };
         fetchExcel();
     }, [scriptsLoaded, autoLoaded]);
+
     // --- lectura del Excel (manual) ---
     const handleFileUpload = (e) => {
         const file = e.target.files[0];
@@ -419,6 +480,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
         };
         reader.readAsArrayBuffer(file);
     };
+
     // --- paletas de color INDEPENDIENTES por lado ---
     const colorMapA = useMemo(
         () => buildColorMap((dataState.bViejas || []).map((r) => get(r, F.ruta)).filter(Boolean)),
@@ -428,22 +490,32 @@ function Dashboard({ scriptsLoaded, onHome }) {
         () => buildColorMap((dataState.bNuevas || []).map((r) => get(r, F.ruta)).filter(Boolean)),
         [dataState]
     );
+
     // --- datos filtrados de forma INDEPENDIENTE ---
     const filteredA = useMemo(() => filterSide(dataState.bViejas, dataState.dViejas, filtersA), [dataState, filtersA]);
     const filteredN = useMemo(() => filterSide(dataState.bNuevas, dataState.dNuevas, filtersN), [dataState, filtersN]);
  
-    // Filtrar los eliminados usando los mismos filtros base que "Nuevas" (para mantener concordancia de ciudad/regional/actividad)
+    // Filtrar los eliminados
     const filteredEliminados = useMemo(() => {
         if (!dataState.eliminados) return [];
         return dataState.eliminados.filter(r => rowMatches(r, filtersN));
     }, [dataState.eliminados, filtersN]);
+
     // --- KPIs ---
     const kpis = useMemo(() => {
         const bV = filteredA.base, dV = filteredA.desp, bN = filteredN.base, dN = filteredN.desp;
         const despSrcV = dV.length ? dV : bV;
         const despSrcN = dN.length ? dN : bN;
+        
+        // CONTEO MEDIANTE COLUMNA ID: Filtra y contabiliza solo los registros que tienen un valor válido en ID
+        const countPDV = (rows) => rows.filter(r => {
+            const id = get(r, F.codigo);
+            return id !== undefined && String(id).trim() !== '';
+        }).length;
+
         return {
-            pdvViejas: bV.length, pdvNuevas: bN.length,
+            pdvViejas: countPDV(bV),
+            pdvNuevas: countPDV(bN),
             cuposViejas: new Set(bV.map((r) => get(r, F.ruta)).filter(Boolean)).size,
             cuposNuevas: new Set(bN.map((r) => get(r, F.ruta)).filter(Boolean)).size,
             despViejas: despSrcV.reduce((s, r) => s + parseNum(get(r, F.desp)), 0),
@@ -452,17 +524,40 @@ function Dashboard({ scriptsLoaded, onHome }) {
             hrsNuevas: bN.reduce((s, r) => s + parseNum(get(r, F.hrs)), 0),
             frecViejas: bV.reduce((s, r) => s + parseIntSafe(get(r, F.frecuencia)), 0),
             frecNuevas: bN.reduce((s, r) => s + parseIntSafe(get(r, F.frecuencia)), 0),
+            impViejas: bV.reduce((s, r) => s + parseNum(get(r, F.impTotal)), 0),
+            impNuevas: bN.reduce((s, r) => s + parseNum(get(r, F.impTotal)), 0)
         };
     }, [filteredA, filteredN]);
+
     const summaryViejas = useMemo(() => computeRouteSummary(filteredA.base, filteredA.desp, colorMapA), [filteredA, colorMapA]);
     const summaryNuevas = useMemo(() => computeRouteSummary(filteredN.base, filteredN.desp, colorMapN), [filteredN, colorMapN]);
     const regionalViejas = useMemo(() => computeRegionalSummary(filteredA.base, filteredA.desp), [filteredA]);
     const regionalNuevas = useMemo(() => computeRegionalSummary(filteredN.base, filteredN.desp), [filteredN]);
+
+    // --- merged regional para exportación paramétrica ---
+    const regionalMerged = useMemo(() => {
+        const regs = {};
+        const getR = (name) => {
+            if (!regs[name]) regs[name] = { reg: name, hrsB: 0, hrsA: 0, pdvB: 0, pdvA: 0, frecB: 0, frecA: 0, despB: 0, despA: 0, cuposB: 0, cuposA: 0, impB: 0, impA: 0 };
+            return regs[name];
+        };
+        regionalViejas.forEach(r => {
+            const row = getR(r.reg);
+            row.hrsB = r.hrsServ; row.pdvB = r.pdv; row.frecB = r.frec; row.despB = r.desp; row.cuposB = r.cupos; row.impB = r.imp;
+        });
+        regionalNuevas.forEach(r => {
+            const row = getR(r.reg);
+            row.hrsA = r.hrsServ; row.pdvA = r.pdv; row.frecA = r.frec; row.despA = r.desp; row.cuposA = r.cupos; row.impA = r.imp;
+        });
+        return Object.values(regs).sort((a,b) => a.reg.localeCompare(b.reg));
+    }, [regionalViejas, regionalNuevas]);
+
     // --- comparativo de PDV eliminados por regional (base nueva vs eliminados) ---
     const eliminadosPorRegional = useMemo(
         () => computeEliminadosPorRegional(filteredN.base, filteredEliminados),
         [filteredN.base, filteredEliminados]
     );
+
     const totalesElim = useMemo(() => {
         return eliminadosPorRegional.reduce(
             (acc, r) => {
@@ -474,6 +569,149 @@ function Dashboard({ scriptsLoaded, onHome }) {
             { cubiertos: 0, eliminados: 0, original: 0 }
         );
     }, [eliminadosPorRegional]);
+
+    // --- Exportar a Excel (Parametrizado por Regional) ---
+    const handleExportKPI = (kpiId, title) => {
+        if (!window.XLSX) {
+            alert("La librería de Excel aún no ha cargado.");
+            return;
+        }
+        
+        const data = [
+            [`Detalle por Regional: ${title.replace(/_/g, ' ')}`],
+            [],
+            ['Regional', 'Propuesta Anterior', 'Propuesta Optimizada', 'Variación (%)']
+        ];
+
+        regionalMerged.forEach(r => {
+            let valB = 0, valA = 0;
+            if (kpiId === 'hrs') { valB = r.hrsB; valA = r.hrsA; }
+            else if (kpiId === 'pdv') { valB = r.pdvB; valA = r.pdvA; }
+            else if (kpiId === 'frec') { valB = r.frecB; valA = r.frecA; }
+            else if (kpiId === 'desp') { valB = r.despB; valA = r.despA; }
+            else if (kpiId === 'cupos') { valB = r.cuposB; valA = r.cuposA; }
+            else if (kpiId === 'promDesp') {
+                valB = r.cuposB ? r.despB / r.cuposB : 0;
+                valA = r.cuposA ? r.despA / r.cuposA : 0;
+            }
+            else if (kpiId === 'ocup') {
+                valB = r.cuposB ? ((r.hrsB + r.despB) / (r.cuposB * 168)) * 100 : 0;
+                valA = r.cuposA ? ((r.hrsA + r.despA) / (r.cuposA * 168)) * 100 : 0;
+            }
+            else if (kpiId === 'pond') {
+                valB = Math.round(r.impB * 100); valA = Math.round(r.impA * 100);
+            }
+
+            const delta = valB ? ((valA - valB) / valB) * 100 : 0;
+            data.push([r.reg, valB, valA, delta]);
+        });
+
+        // Totales Globales
+        let gB = 0, gA = 0;
+        if (kpiId === 'hrs') { gB = kpis.hrsViejas; gA = kpis.hrsNuevas; }
+        else if (kpiId === 'pdv') { gB = kpis.pdvViejas; gA = kpis.pdvNuevas; }
+        else if (kpiId === 'frec') { gB = kpis.frecViejas; gA = kpis.frecNuevas; }
+        else if (kpiId === 'desp') { gB = kpis.despViejas; gA = kpis.despNuevas; }
+        else if (kpiId === 'cupos') { gB = kpis.cuposViejas; gA = kpis.cuposNuevas; }
+        else if (kpiId === 'promDesp') {
+            gB = kpis.cuposViejas ? kpis.despViejas / kpis.cuposViejas : 0;
+            gA = kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0;
+        }
+        else if (kpiId === 'ocup') {
+            gB = kpis.cuposViejas ? ((kpis.hrsViejas + kpis.despViejas) / (kpis.cuposViejas * 168)) * 100 : 0;
+            gA = kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0;
+        }
+        else if (kpiId === 'pond') {
+            gB = Math.round(kpis.impViejas * 100); gA = Math.round(kpis.impNuevas * 100);
+        }
+
+        data.push([]);
+        data.push(['TOTAL GENERAL', gB, gA, gB ? ((gA - gB) / gB) * 100 : 0]);
+
+        const wb = window.XLSX.utils.book_new();
+        const ws = window.XLSX.utils.aoa_to_sheet(data);
+        window.XLSX.utils.book_append_sheet(wb, ws, "KPI Regional");
+        window.XLSX.writeFile(wb, `KPI_${title}_Por_Regional.xlsx`);
+    };
+
+    const handleExportAll = () => {
+        if (!window.XLSX) {
+            alert("La librería de Excel aún no ha cargado.");
+            return;
+        }
+        const wb = window.XLSX.utils.book_new();
+
+        // 1. Resumen Global
+        const ocupB = kpis.cuposViejas ? ((kpis.hrsViejas + kpis.despViejas) / (kpis.cuposViejas * 168)) * 100 : 0;
+        const ocupA = kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0;
+        const promDespB = kpis.cuposViejas ? kpis.despViejas / kpis.cuposViejas : 0;
+        const promDespA = kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0;
+
+        const kpiData = [
+            ['Resumen de Indicadores Clave (TOTALES) - Haleon'],
+            [],
+            ['Indicador', 'Propuesta Anterior', 'Propuesta Optimizada', 'Variación (%)'],
+            ['Total Hrs Servicio (Mes)', kpis.hrsViejas, kpis.hrsNuevas, kpis.hrsViejas ? ((kpis.hrsNuevas - kpis.hrsViejas)/kpis.hrsViejas)*100 : 0],
+            ['Total Registros (PDV)', kpis.pdvViejas, kpis.pdvNuevas, kpis.pdvViejas ? ((kpis.pdvNuevas - kpis.pdvViejas)/kpis.pdvViejas)*100 : 0],
+            ['Total Frecuencias (Visitas)', kpis.frecViejas, kpis.frecNuevas, kpis.frecViejas ? ((kpis.frecNuevas - kpis.frecViejas)/kpis.frecViejas)*100 : 0],
+            ['Tiempo Desplazamiento', kpis.despViejas, kpis.despNuevas, kpis.despViejas ? ((kpis.despNuevas - kpis.despViejas)/kpis.despViejas)*100 : 0],
+            ['Cupos Requeridos (Rutas)', kpis.cuposViejas, kpis.cuposNuevas, kpis.cuposViejas ? ((kpis.cuposNuevas - kpis.cuposViejas)/kpis.cuposViejas)*100 : 0],
+            ['Prom. Desplaz. x Cupo', promDespB, promDespA, promDespB ? ((promDespA - promDespB)/promDespB)*100 : 0],
+            ['Ocupación Laboral Promedio (%)', ocupB, ocupA, ocupB ? ((ocupA - ocupB)/ocupB)*100 : 0],
+            ['Ponderado (IMP TOTAL)', Math.round(kpis.impViejas * 100), Math.round(kpis.impNuevas * 100), kpis.impViejas ? ((kpis.impNuevas - kpis.impViejas)/kpis.impViejas)*100 : 0]
+        ];
+        const wsKpi = window.XLSX.utils.aoa_to_sheet(kpiData);
+        window.XLSX.utils.book_append_sheet(wb, wsKpi, "Resumen Global");
+
+        // 2. Resumen DETALLADO por Regional (NUEVA PESTAÑA)
+        const dataReg = [
+            ['Resumen de Indicadores Clave POR REGIONAL - Haleon'],
+            [],
+            [
+                'Regional',
+                'PDV Anterior', 'PDV Optimizado', 'Var PDV %',
+                'Hrs Servicio Anterior', 'Hrs Servicio Optimizado', 'Var Hrs %',
+                'Frecuencias Anterior', 'Frecuencias Optimizado', 'Var Frec %',
+                'Desplazamiento Anterior', 'Desplazamiento Optimizado', 'Var Desp %',
+                'Cupos Anterior', 'Cupos Optimizado', 'Var Cupos %',
+                'Ocupación Anterior %', 'Ocupación Optimizado %', 'Var Ocupación %',
+                'Ponderado Anterior', 'Ponderado Optimizado'
+            ]
+        ];
+
+        regionalMerged.forEach(r => {
+            const d = (a, b) => b ? ((a-b)/b)*100 : 0;
+            const ocB = r.cuposB ? ((r.hrsB+r.despB)/(r.cuposB*168))*100 : 0;
+            const ocA = r.cuposA ? ((r.hrsA+r.despA)/(r.cuposA*168))*100 : 0;
+            dataReg.push([
+                r.reg,
+                r.pdvB, r.pdvA, d(r.pdvA, r.pdvB),
+                r.hrsB, r.hrsA, d(r.hrsA, r.hrsB),
+                r.frecB, r.frecA, d(r.frecA, r.frecB),
+                r.despB, r.despA, d(r.despA, r.despB),
+                r.cuposB, r.cuposA, d(r.cuposA, r.cuposB),
+                ocB, ocA, d(ocA, ocB),
+                Math.round(r.impB * 100), Math.round(r.impA * 100)
+            ]);
+        });
+        const wsReg = window.XLSX.utils.aoa_to_sheet(dataReg);
+        window.XLSX.utils.book_append_sheet(wb, wsReg, "Resumen por Regional");
+
+        // 3. Tablas resumen de rutas
+        const formatRuta = (s) => ({
+            'Ruta / Usuario': s.ruta, 'PDV': s.pdv, 'Frecuencia': s.frec,
+            'Hrs Servicio': s.hrsServ, 'Hrs Desplazamiento': s.desp,
+            'Total Hrs': s.total, 'Ocupación (168h) %': s.pct
+        });
+        const wsRutasNuevas = window.XLSX.utils.json_to_sheet(summaryNuevas.map(formatRuta));
+        window.XLSX.utils.book_append_sheet(wb, wsRutasNuevas, "Rutas Optimizada");
+
+        const wsRutasViejas = window.XLSX.utils.json_to_sheet(summaryViejas.map(formatRuta));
+        window.XLSX.utils.book_append_sheet(wb, wsRutasViejas, "Rutas Anterior");
+
+        window.XLSX.writeFile(wb, "Reporte_General_Dashboard.xlsx");
+    };
+
     // --- fila de tabla de resumen por ruta (compartida) ---
     const RouteRow = ({ s }) => {
         const isGreen = s.pct >= 98 && s.pct <= 101;
@@ -505,6 +743,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
             </tr>
         );
     };
+
     const RouteTableHead = () => (
         <thead className="sticky top-0 z-20">
             <tr className="text-xs uppercase text-slate-500">
@@ -518,9 +757,11 @@ function Dashboard({ scriptsLoaded, onHome }) {
             </tr>
         </thead>
     );
+
     const emptyRow = (cols, msg) => (
         <tr><td colSpan={cols} className="text-center text-slate-400 py-8">{msg}</td></tr>
     );
+
     // --- fila / encabezado del comparativo por REGIONAL ---
     const RegionalRow = ({ s }) => {
         const over = s.pctProm > 100;
@@ -547,6 +788,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
             </tr>
         );
     };
+
     const RegionalTableHead = () => (
         <thead className="sticky top-0 z-20">
             <tr className="text-xs uppercase text-slate-500">
@@ -560,6 +802,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
             </tr>
         </thead>
     );
+
     // Preparar filas para la tabla del directorio general
     const rowsToRender = useMemo(() => {
         let rows = [];
@@ -575,7 +818,8 @@ function Dashboard({ scriptsLoaded, onHome }) {
         }
         return rows;
     }, [filteredN.base, filteredEliminados, coberturaFilter]);
-    // --- directorio general (rutas nuevas, con Decil e Imp Total) ---
+
+    // --- directorio general ---
     const renderTableGeneral = () => {
         if (rowsToRender.length === 0) return emptyRow(9, 'No hay datos para mostrar con el filtro actual...');
  
@@ -611,6 +855,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
             );
         });
     };
+
     return (
         <div className="min-h-screen bg-slate-100 font-sans p-6 overflow-x-hidden flex justify-center">
             <div className="w-full max-w-[1800px] flex flex-col gap-6">
@@ -645,22 +890,44 @@ function Dashboard({ scriptsLoaded, onHome }) {
                         <Logos h={30} />
                     </div>
                 </header>
+
+                {/* HEADER KPIs + BOTON EXCEL GENERAL */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 mt-2 mb-1">
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-800">Indicadores Clave</h2>
+                        <p className="text-sm text-slate-500 mt-1">Pasa el ratón sobre cada KPI para descargarlo detallado por <span className="font-bold text-slate-700">REGIONAL</span>.</p>
+                    </div>
+                    <button
+                        onClick={handleExportAll}
+                        disabled={!scriptsLoaded || isLoading}
+                        className="px-6 py-3 rounded-xl bg-slate-800 text-white font-extrabold text-sm shadow-lg hover:bg-slate-700 hover:scale-105 hover:shadow-xl transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                    >
+                        <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Descargar Todo (General)
+                    </button>
+                </div>
+
                 {/* KPIS (comparan cada lado según su propio filtro) */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 xl:gap-4">
-                    <KPICard title="Total Hrs Servicio (Mes)" valB={kpis.hrsViejas} valA={kpis.hrsNuevas} format="hrs" />
-                    <KPICard title="Puntos de Venta (PDV)" valB={kpis.pdvViejas} valA={kpis.pdvNuevas} format="num" />
-                    <KPICard title="Total Frecuencias (Visitas)" valB={kpis.frecViejas} valA={kpis.frecNuevas} format="num" />
-                    <KPICard title="Tiempo Desplazamiento" valB={kpis.despViejas} valA={kpis.despNuevas} format="hrs" inverse />
-                    <KPICard title="Cupos Requeridos (Rutas)" valB={kpis.cuposViejas} valA={kpis.cuposNuevas} format="num" inverse />
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3 xl:gap-4">
+                    <KPICard title="Total Hrs Servicio (Mes)" valB={kpis.hrsViejas} valA={kpis.hrsNuevas} format="hrs" onDownload={() => handleExportKPI("hrs", "Total_Hrs_Servicio")} />
+                    <KPICard title="Total Registros (PDV)" valB={kpis.pdvViejas} valA={kpis.pdvNuevas} format="num" onDownload={() => handleExportKPI("pdv", "Total_Registros")} />
+                    <KPICard title="Total Frecuencias (Visitas)" valB={kpis.frecViejas} valA={kpis.frecNuevas} format="num" onDownload={() => handleExportKPI("frec", "Frecuencias")} />
+                    <KPICard title="Tiempo Desplazamiento" valB={kpis.despViejas} valA={kpis.despNuevas} format="hrs" inverse onDownload={() => handleExportKPI("desp", "Tiempo_Desplazamiento")} />
+                    <KPICard title="Cupos Requeridos (Rutas)" valB={kpis.cuposViejas} valA={kpis.cuposNuevas} format="num" inverse onDownload={() => handleExportKPI("cupos", "Cupos_Requeridos")} />
                     <KPICard title="Prom. Desplaz. x Cupo"
                         valB={kpis.cuposViejas ? kpis.despViejas / kpis.cuposViejas : 0}
                         valA={kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0}
-                        format="hrs" inverse />
+                        format="hrs" inverse onDownload={() => handleExportKPI("promDesp", "Prom_Desplaz_x_Cupo")} />
                     <KPICard title="Ocupación Laboral Promedio"
                         valB={kpis.cuposViejas ? ((kpis.hrsViejas + kpis.despViejas) / (kpis.cuposViejas * 168)) * 100 : 0}
                         valA={kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0}
-                        format="pct" inverse />
+                        format="pct" inverse onDownload={() => handleExportKPI("ocup", "Ocupacion_Promedio")} />
+                    <KPICard title="Ponderado (IMP TOTAL)" 
+                        valB={kpis.impViejas * 100} 
+                        valA={kpis.impNuevas * 100} 
+                        format="pct-int" onDownload={() => handleExportKPI("pond", "Ponderado")} />
                 </div>
+
                 {/* DOS COLUMNAS INDEPENDIENTES */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* ===== LADO IZQUIERDO: ANTERIOR ===== */}
@@ -694,6 +961,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
                             </div>
                         </div>
                     </div>
+
                     {/* ===== LADO DERECHO: OPTIMIZADA ===== */}
                     <div className="flex flex-col gap-4">
                         <FilterBar
@@ -727,6 +995,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
                         </div>
                     </div>
                 </div>
+
                 {/* COMPARATIVO POR REGIONAL */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col max-h-[460px]">
@@ -742,6 +1011,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
                             </table>
                         </div>
                     </div>
+
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col max-h-[460px] border-t-4 border-t-[#56D400]">
                         <div className="px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
                             <h3 className="text-lg font-bold text-slate-800">Comparativo por Regional <span className="text-[#56D400]">(Optimizado)</span></h3>
@@ -756,7 +1026,8 @@ function Dashboard({ scriptsLoaded, onHome }) {
                         </div>
                     </div>
                 </div>
-                {/* PDV ELIMINADOS POR REGIONAL (base optimizada vs ids eliminados) */}
+
+                {/* PDV ELIMINADOS POR REGIONAL */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col max-h-[560px] border-t-4 border-t-red-400">
                     <div className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0">
                         <h3 className="text-xl font-bold text-slate-800">Puntos de Venta Eliminados por Regional</h3>
@@ -816,7 +1087,8 @@ function Dashboard({ scriptsLoaded, onHome }) {
                         </table>
                     </div>
                 </div>
-                {/* DIRECTORIO GENERAL (rutas nuevas + filtro de cobertura + columnas nuevas) */}
+
+                {/* DIRECTORIO GENERAL */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col max-h-[620px]">
                     <div className="px-6 pt-6 pb-4 border-b border-slate-100 shrink-0 flex flex-col md:flex-row gap-4 justify-between items-start md:items-end">
                         <div>
@@ -861,15 +1133,17 @@ function Dashboard({ scriptsLoaded, onHome }) {
         </div>
     );
 }
+
 // =============================================================
 //  TARJETA KPI
 // =============================================================
-function KPICard({ title, valB, valA, format = 'num', inverse = false }) {
+function KPICard({ title, valB, valA, format = 'num', inverse = false, onDownload }) {
     const formatVal = (v) => {
         if (typeof v !== 'number' || isNaN(v)) return '0';
         if (format === 'num') return Math.round(v).toLocaleString();
         if (format === 'hrs') return v.toFixed(1) + 'h';
         if (format === 'pct') return v.toFixed(1) + '%';
+        if (format === 'pct-int') return Math.round(v) + '%';
         return String(v);
     };
     let deltaStr = '-', isGood = false, isNeutral = true;
@@ -880,8 +1154,15 @@ function KPICard({ title, valB, valA, format = 'num', inverse = false }) {
         isGood = inverse ? delta < 0 : delta > 0;
     }
     return (
-        <div className="bg-white rounded-2xl p-4 xl:p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition-shadow overflow-hidden w-full">
-            <h4 className="text-[10px] xl:text-xs font-bold text-slate-500 uppercase tracking-wide min-h-[2.5rem] leading-tight mb-2 line-clamp-2">{title}</h4>
+        <div className="bg-white rounded-2xl p-4 xl:p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition-shadow overflow-hidden w-full relative group">
+            <div className="flex justify-between items-start mb-2 gap-2">
+                <h4 className="text-[10px] xl:text-xs font-bold text-slate-500 uppercase tracking-wide min-h-[2.5rem] leading-tight line-clamp-2 flex-1">{title}</h4>
+                {onDownload && (
+                    <button onClick={onDownload} title={`Descargar detalle por Regional de: ${title}`} className="p-1.5 rounded-lg text-slate-400 hover:text-[#56D400] hover:bg-[#56D400]/10 opacity-0 group-hover:opacity-100 transition-all shrink-0 -mt-1 -mr-1">
+                        <svg width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                    </button>
+                )}
+            </div>
             <div className="flex justify-between items-end gap-2">
                 <div className="flex flex-col min-w-0 flex-1">
                     <span className="text-xs xl:text-sm font-semibold text-slate-400 line-through mb-1 truncate">{formatVal(valB)}</span>
@@ -895,6 +1176,7 @@ function KPICard({ title, valB, valA, format = 'num', inverse = false }) {
         </div>
     );
 }
+
 // =============================================================
 //  PORTADA / PANTALLA DE BIENVENIDA (con mapa de Colombia)
 // =============================================================
@@ -923,6 +1205,7 @@ const PORTADA_RUTAS = [
     [0, 1],
     [0, 12, 13],
 ];
+
 function PortadaMap() {
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
@@ -961,6 +1244,7 @@ function PortadaMap() {
     }, []);
     return <div ref={mapRef} className="absolute inset-0 w-full h-full" style={{ background: '#eef2f7' }} />;
 }
+
 function Portada({ onEnter, scriptsLoaded }) {
     return (
         <div className="min-h-screen relative overflow-hidden bg-slate-100 font-sans">
@@ -1046,6 +1330,7 @@ function Portada({ onEnter, scriptsLoaded }) {
         </div>
     );
 }
+
 // =============================================================
 //  RAÍZ
 // =============================================================
