@@ -32,3 +32,6 @@ pnpm-debug.log*
 
 # Vercel
 .vercel
+
+# Claude Code (config local, no compartida)
+.claude/settings.local.json
