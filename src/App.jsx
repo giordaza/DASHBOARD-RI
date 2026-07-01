@@ -494,9 +494,11 @@ function Dashboard({ scriptsLoaded, onHome }) {
         return dataState.eliminados.filter(r => rowMatches(r, filtersN));
     }, [dataState.eliminados, filtersN]);
 
-    // --- KPIs ---
+    // --- KPIs (Optimizada vs. total histórico de la Propuesta Anterior) ---
     const kpis = useMemo(() => {
+        const bV = dataState.bViejas || [], dV = dataState.dViejas || [];
         const bN = filteredN.base, dN = filteredN.desp;
+        const despSrcV = dV.length ? dV : bV;
         const despSrcN = dN.length ? dN : bN;
 
         // CONTEO MEDIANTE COLUMNA ID: Filtra y contabiliza solo los registros que tienen un valor válido en ID
@@ -506,17 +508,43 @@ function Dashboard({ scriptsLoaded, onHome }) {
         }).length;
 
         return {
+            pdvViejas: countPDV(bV),
             pdvNuevas: countPDV(bN),
+            cuposViejas: new Set(bV.map((r) => get(r, F.ruta)).filter(Boolean)).size,
             cuposNuevas: new Set(bN.map((r) => get(r, F.ruta)).filter(Boolean)).size,
+            despViejas: despSrcV.reduce((s, r) => s + parseNum(get(r, F.desp)), 0),
             despNuevas: despSrcN.reduce((s, r) => s + parseNum(get(r, F.desp)), 0),
+            hrsViejas: bV.reduce((s, r) => s + parseNum(get(r, F.hrs)), 0),
             hrsNuevas: bN.reduce((s, r) => s + parseNum(get(r, F.hrs)), 0),
+            frecViejas: bV.reduce((s, r) => s + parseIntSafe(get(r, F.frecuencia)), 0),
             frecNuevas: bN.reduce((s, r) => s + parseIntSafe(get(r, F.frecuencia)), 0),
+            impViejas: bV.reduce((s, r) => s + parseNum(get(r, F.impTotal)), 0),
             impNuevas: bN.reduce((s, r) => s + parseNum(get(r, F.impTotal)), 0)
         };
-    }, [filteredN]);
+    }, [dataState.bViejas, dataState.dViejas, filteredN]);
 
     const summaryNuevas = useMemo(() => computeRouteSummary(filteredN.base, filteredN.desp, colorMapN), [filteredN, colorMapN]);
+    const summaryViejas = useMemo(() => computeRouteSummary(dataState.bViejas, dataState.dViejas, {}), [dataState.bViejas, dataState.dViejas]);
     const regionalNuevas = useMemo(() => computeRegionalSummary(filteredN.base, filteredN.desp), [filteredN]);
+    const regionalViejas = useMemo(() => computeRegionalSummary(dataState.bViejas, dataState.dViejas), [dataState.bViejas, dataState.dViejas]);
+
+    // --- merged regional para exportación paramétrica ---
+    const regionalMerged = useMemo(() => {
+        const regs = {};
+        const getR = (name) => {
+            if (!regs[name]) regs[name] = { reg: name, hrsB: 0, hrsA: 0, pdvB: 0, pdvA: 0, frecB: 0, frecA: 0, despB: 0, despA: 0, cuposB: 0, cuposA: 0, impB: 0, impA: 0 };
+            return regs[name];
+        };
+        regionalViejas.forEach(r => {
+            const row = getR(r.reg);
+            row.hrsB = r.hrsServ; row.pdvB = r.pdv; row.frecB = r.frec; row.despB = r.desp; row.cuposB = r.cupos; row.impB = r.imp;
+        });
+        regionalNuevas.forEach(r => {
+            const row = getR(r.reg);
+            row.hrsA = r.hrsServ; row.pdvA = r.pdv; row.frecA = r.frec; row.despA = r.desp; row.cuposA = r.cupos; row.impA = r.imp;
+        });
+        return Object.values(regs).sort((a,b) => a.reg.localeCompare(b.reg));
+    }, [regionalViejas, regionalNuevas]);
 
     // --- comparativo de PDV eliminados por regional (base nueva vs eliminados) ---
     const eliminadosPorRegional = useMemo(
@@ -546,36 +574,53 @@ function Dashboard({ scriptsLoaded, onHome }) {
         const data = [
             [`Detalle por Regional: ${title.replace(/_/g, ' ')}`],
             [],
-            ['Regional', 'Propuesta Optimizada']
+            ['Regional', 'Propuesta Anterior', 'Propuesta Optimizada', 'Variación (%)']
         ];
 
-        regionalNuevas.forEach(r => {
-            let val = 0;
-            if (kpiId === 'hrs') val = r.hrsServ;
-            else if (kpiId === 'pdv') val = r.pdv;
-            else if (kpiId === 'frec') val = r.frec;
-            else if (kpiId === 'desp') val = r.desp;
-            else if (kpiId === 'cupos') val = r.cupos;
-            else if (kpiId === 'promDesp') val = r.cupos ? r.desp / r.cupos : 0;
-            else if (kpiId === 'ocup') val = r.cupos ? ((r.hrsServ + r.desp) / (r.cupos * 168)) * 100 : 0;
-            else if (kpiId === 'pond') val = Math.round(r.imp * 100);
+        regionalMerged.forEach(r => {
+            let valB = 0, valA = 0;
+            if (kpiId === 'hrs') { valB = r.hrsB; valA = r.hrsA; }
+            else if (kpiId === 'pdv') { valB = r.pdvB; valA = r.pdvA; }
+            else if (kpiId === 'frec') { valB = r.frecB; valA = r.frecA; }
+            else if (kpiId === 'desp') { valB = r.despB; valA = r.despA; }
+            else if (kpiId === 'cupos') { valB = r.cuposB; valA = r.cuposA; }
+            else if (kpiId === 'promDesp') {
+                valB = r.cuposB ? r.despB / r.cuposB : 0;
+                valA = r.cuposA ? r.despA / r.cuposA : 0;
+            }
+            else if (kpiId === 'ocup') {
+                valB = r.cuposB ? ((r.hrsB + r.despB) / (r.cuposB * 168)) * 100 : 0;
+                valA = r.cuposA ? ((r.hrsA + r.despA) / (r.cuposA * 168)) * 100 : 0;
+            }
+            else if (kpiId === 'pond') {
+                valB = Math.round(r.impB * 100); valA = Math.round(r.impA * 100);
+            }
 
-            data.push([r.reg, val]);
+            const delta = valB ? ((valA - valB) / valB) * 100 : 0;
+            data.push([r.reg, valB, valA, delta]);
         });
 
-        // Total Global
-        let g = 0;
-        if (kpiId === 'hrs') g = kpis.hrsNuevas;
-        else if (kpiId === 'pdv') g = kpis.pdvNuevas;
-        else if (kpiId === 'frec') g = kpis.frecNuevas;
-        else if (kpiId === 'desp') g = kpis.despNuevas;
-        else if (kpiId === 'cupos') g = kpis.cuposNuevas;
-        else if (kpiId === 'promDesp') g = kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0;
-        else if (kpiId === 'ocup') g = kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0;
-        else if (kpiId === 'pond') g = Math.round(kpis.impNuevas * 100);
+        // Totales Globales
+        let gB = 0, gA = 0;
+        if (kpiId === 'hrs') { gB = kpis.hrsViejas; gA = kpis.hrsNuevas; }
+        else if (kpiId === 'pdv') { gB = kpis.pdvViejas; gA = kpis.pdvNuevas; }
+        else if (kpiId === 'frec') { gB = kpis.frecViejas; gA = kpis.frecNuevas; }
+        else if (kpiId === 'desp') { gB = kpis.despViejas; gA = kpis.despNuevas; }
+        else if (kpiId === 'cupos') { gB = kpis.cuposViejas; gA = kpis.cuposNuevas; }
+        else if (kpiId === 'promDesp') {
+            gB = kpis.cuposViejas ? kpis.despViejas / kpis.cuposViejas : 0;
+            gA = kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0;
+        }
+        else if (kpiId === 'ocup') {
+            gB = kpis.cuposViejas ? ((kpis.hrsViejas + kpis.despViejas) / (kpis.cuposViejas * 168)) * 100 : 0;
+            gA = kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0;
+        }
+        else if (kpiId === 'pond') {
+            gB = Math.round(kpis.impViejas * 100); gA = Math.round(kpis.impNuevas * 100);
+        }
 
         data.push([]);
-        data.push(['TOTAL GENERAL', g]);
+        data.push(['TOTAL GENERAL', gB, gA, gB ? ((gA - gB) / gB) * 100 : 0]);
 
         const wb = window.XLSX.utils.book_new();
         const ws = window.XLSX.utils.aoa_to_sheet(data);
@@ -591,21 +636,23 @@ function Dashboard({ scriptsLoaded, onHome }) {
         const wb = window.XLSX.utils.book_new();
 
         // 1. Resumen Global
-        const ocup = kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0;
-        const promDesp = kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0;
+        const ocupB = kpis.cuposViejas ? ((kpis.hrsViejas + kpis.despViejas) / (kpis.cuposViejas * 168)) * 100 : 0;
+        const ocupA = kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0;
+        const promDespB = kpis.cuposViejas ? kpis.despViejas / kpis.cuposViejas : 0;
+        const promDespA = kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0;
 
         const kpiData = [
             ['Resumen de Indicadores Clave (TOTALES) - Haleon'],
             [],
-            ['Indicador', 'Propuesta Optimizada'],
-            ['Total Hrs Servicio (Mes)', kpis.hrsNuevas],
-            ['Total Registros (PDV)', kpis.pdvNuevas],
-            ['Total Frecuencias (Visitas)', kpis.frecNuevas],
-            ['Tiempo Desplazamiento', kpis.despNuevas],
-            ['Cupos Requeridos (Rutas)', kpis.cuposNuevas],
-            ['Prom. Desplaz. x Cupo', promDesp],
-            ['Ocupación Laboral Promedio (%)', ocup],
-            ['Ponderado (IMP TOTAL)', Math.round(kpis.impNuevas * 100)]
+            ['Indicador', 'Propuesta Anterior', 'Propuesta Optimizada', 'Variación (%)'],
+            ['Total Hrs Servicio (Mes)', kpis.hrsViejas, kpis.hrsNuevas, kpis.hrsViejas ? ((kpis.hrsNuevas - kpis.hrsViejas)/kpis.hrsViejas)*100 : 0],
+            ['Total Registros (PDV)', kpis.pdvViejas, kpis.pdvNuevas, kpis.pdvViejas ? ((kpis.pdvNuevas - kpis.pdvViejas)/kpis.pdvViejas)*100 : 0],
+            ['Total Frecuencias (Visitas)', kpis.frecViejas, kpis.frecNuevas, kpis.frecViejas ? ((kpis.frecNuevas - kpis.frecViejas)/kpis.frecViejas)*100 : 0],
+            ['Tiempo Desplazamiento', kpis.despViejas, kpis.despNuevas, kpis.despViejas ? ((kpis.despNuevas - kpis.despViejas)/kpis.despViejas)*100 : 0],
+            ['Cupos Requeridos (Rutas)', kpis.cuposViejas, kpis.cuposNuevas, kpis.cuposViejas ? ((kpis.cuposNuevas - kpis.cuposViejas)/kpis.cuposViejas)*100 : 0],
+            ['Prom. Desplaz. x Cupo', promDespB, promDespA, promDespB ? ((promDespA - promDespB)/promDespB)*100 : 0],
+            ['Ocupación Laboral Promedio (%)', ocupB, ocupA, ocupB ? ((ocupA - ocupB)/ocupB)*100 : 0],
+            ['Ponderado (IMP TOTAL)', Math.round(kpis.impViejas * 100), Math.round(kpis.impNuevas * 100), kpis.impViejas ? ((kpis.impNuevas - kpis.impViejas)/kpis.impViejas)*100 : 0]
         ];
         const wsKpi = window.XLSX.utils.aoa_to_sheet(kpiData);
         window.XLSX.utils.book_append_sheet(wb, wsKpi, "Resumen Global");
@@ -614,17 +661,37 @@ function Dashboard({ scriptsLoaded, onHome }) {
         const dataReg = [
             ['Resumen de Indicadores Clave POR REGIONAL - Haleon'],
             [],
-            ['Regional', 'PDV', 'Hrs Servicio', 'Frecuencias', 'Desplazamiento', 'Cupos', 'Ocupación %', 'Ponderado']
+            [
+                'Regional',
+                'PDV Anterior', 'PDV Optimizado', 'Var PDV %',
+                'Hrs Servicio Anterior', 'Hrs Servicio Optimizado', 'Var Hrs %',
+                'Frecuencias Anterior', 'Frecuencias Optimizado', 'Var Frec %',
+                'Desplazamiento Anterior', 'Desplazamiento Optimizado', 'Var Desp %',
+                'Cupos Anterior', 'Cupos Optimizado', 'Var Cupos %',
+                'Ocupación Anterior %', 'Ocupación Optimizado %', 'Var Ocupación %',
+                'Ponderado Anterior', 'Ponderado Optimizado'
+            ]
         ];
 
-        regionalNuevas.forEach(r => {
-            const oc = r.cupos ? ((r.hrsServ + r.desp) / (r.cupos * 168)) * 100 : 0;
-            dataReg.push([r.reg, r.pdv, r.hrsServ, r.frec, r.desp, r.cupos, oc, Math.round(r.imp * 100)]);
+        regionalMerged.forEach(r => {
+            const d = (a, b) => b ? ((a-b)/b)*100 : 0;
+            const ocB = r.cuposB ? ((r.hrsB+r.despB)/(r.cuposB*168))*100 : 0;
+            const ocA = r.cuposA ? ((r.hrsA+r.despA)/(r.cuposA*168))*100 : 0;
+            dataReg.push([
+                r.reg,
+                r.pdvB, r.pdvA, d(r.pdvA, r.pdvB),
+                r.hrsB, r.hrsA, d(r.hrsA, r.hrsB),
+                r.frecB, r.frecA, d(r.frecA, r.frecB),
+                r.despB, r.despA, d(r.despA, r.despB),
+                r.cuposB, r.cuposA, d(r.cuposA, r.cuposB),
+                ocB, ocA, d(ocA, ocB),
+                Math.round(r.impB * 100), Math.round(r.impA * 100)
+            ]);
         });
         const wsReg = window.XLSX.utils.aoa_to_sheet(dataReg);
         window.XLSX.utils.book_append_sheet(wb, wsReg, "Resumen por Regional");
 
-        // 3. Tabla resumen de rutas
+        // 3. Tablas resumen de rutas
         const formatRuta = (s) => ({
             'Ruta / Usuario': s.ruta, 'PDV': s.pdv, 'Frecuencia': s.frec,
             'Hrs Servicio': s.hrsServ, 'Hrs Desplazamiento': s.desp,
@@ -632,6 +699,9 @@ function Dashboard({ scriptsLoaded, onHome }) {
         });
         const wsRutasNuevas = window.XLSX.utils.json_to_sheet(summaryNuevas.map(formatRuta));
         window.XLSX.utils.book_append_sheet(wb, wsRutasNuevas, "Rutas Optimizada");
+
+        const wsRutasViejas = window.XLSX.utils.json_to_sheet(summaryViejas.map(formatRuta));
+        window.XLSX.utils.book_append_sheet(wb, wsRutasViejas, "Rutas Anterior");
 
         window.XLSX.writeFile(wb, "Reporte_General_Dashboard.xlsx");
     };
@@ -831,21 +901,24 @@ function Dashboard({ scriptsLoaded, onHome }) {
                     </button>
                 </div>
 
-                {/* KPIS de la propuesta optimizada */}
+                {/* KPIS (Propuesta Optimizada vs. Anterior) */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3 xl:gap-4">
-                    <KPICard title="Total Hrs Servicio (Mes)" val={kpis.hrsNuevas} format="hrs" onDownload={() => handleExportKPI("hrs", "Total_Hrs_Servicio")} />
-                    <KPICard title="Total Registros (PDV)" val={kpis.pdvNuevas} format="num" onDownload={() => handleExportKPI("pdv", "Total_Registros")} />
-                    <KPICard title="Total Frecuencias (Visitas)" val={kpis.frecNuevas} format="num" onDownload={() => handleExportKPI("frec", "Frecuencias")} />
-                    <KPICard title="Tiempo Desplazamiento" val={kpis.despNuevas} format="hrs" onDownload={() => handleExportKPI("desp", "Tiempo_Desplazamiento")} />
-                    <KPICard title="Cupos Requeridos (Rutas)" val={kpis.cuposNuevas} format="num" onDownload={() => handleExportKPI("cupos", "Cupos_Requeridos")} />
+                    <KPICard title="Total Hrs Servicio (Mes)" valB={kpis.hrsViejas} valA={kpis.hrsNuevas} format="hrs" onDownload={() => handleExportKPI("hrs", "Total_Hrs_Servicio")} />
+                    <KPICard title="Total Registros (PDV)" valB={kpis.pdvViejas} valA={kpis.pdvNuevas} format="num" onDownload={() => handleExportKPI("pdv", "Total_Registros")} />
+                    <KPICard title="Total Frecuencias (Visitas)" valB={kpis.frecViejas} valA={kpis.frecNuevas} format="num" onDownload={() => handleExportKPI("frec", "Frecuencias")} />
+                    <KPICard title="Tiempo Desplazamiento" valB={kpis.despViejas} valA={kpis.despNuevas} format="hrs" inverse onDownload={() => handleExportKPI("desp", "Tiempo_Desplazamiento")} />
+                    <KPICard title="Cupos Requeridos (Rutas)" valB={kpis.cuposViejas} valA={kpis.cuposNuevas} format="num" inverse onDownload={() => handleExportKPI("cupos", "Cupos_Requeridos")} />
                     <KPICard title="Prom. Desplaz. x Cupo"
-                        val={kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0}
-                        format="hrs" onDownload={() => handleExportKPI("promDesp", "Prom_Desplaz_x_Cupo")} />
+                        valB={kpis.cuposViejas ? kpis.despViejas / kpis.cuposViejas : 0}
+                        valA={kpis.cuposNuevas ? kpis.despNuevas / kpis.cuposNuevas : 0}
+                        format="hrs" inverse onDownload={() => handleExportKPI("promDesp", "Prom_Desplaz_x_Cupo")} />
                     <KPICard title="Ocupación Laboral Promedio"
-                        val={kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0}
-                        format="pct" onDownload={() => handleExportKPI("ocup", "Ocupacion_Promedio")} />
+                        valB={kpis.cuposViejas ? ((kpis.hrsViejas + kpis.despViejas) / (kpis.cuposViejas * 168)) * 100 : 0}
+                        valA={kpis.cuposNuevas ? ((kpis.hrsNuevas + kpis.despNuevas) / (kpis.cuposNuevas * 168)) * 100 : 0}
+                        format="pct" inverse onDownload={() => handleExportKPI("ocup", "Ocupacion_Promedio")} />
                     <KPICard title="Ponderado (IMP TOTAL)"
-                        val={kpis.impNuevas * 100}
+                        valB={kpis.impViejas * 100}
+                        valA={kpis.impNuevas * 100}
                         format="pct-int" onDownload={() => handleExportKPI("pond", "Ponderado")} />
                 </div>
 
@@ -1007,7 +1080,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
 // =============================================================
 //  TARJETA KPI
 // =============================================================
-function KPICard({ title, val, format = 'num', onDownload }) {
+function KPICard({ title, valB, valA, format = 'num', inverse = false, onDownload }) {
     const formatVal = (v) => {
         if (typeof v !== 'number' || isNaN(v)) return '0';
         if (format === 'num') return Math.round(v).toLocaleString();
@@ -1016,6 +1089,13 @@ function KPICard({ title, val, format = 'num', onDownload }) {
         if (format === 'pct-int') return Math.round(v) + '%';
         return String(v);
     };
+    let deltaStr = '-', isGood = false, isNeutral = true;
+    if (valB > 0) {
+        const delta = ((valA - valB) / valB) * 100;
+        deltaStr = (delta > 0 ? '+' : '') + delta.toFixed(1) + '%';
+        isNeutral = Math.abs(delta) < 0.5;
+        isGood = inverse ? delta < 0 : delta > 0;
+    }
     return (
         <div className="bg-white rounded-2xl p-4 xl:p-5 shadow-sm border border-slate-200 flex flex-col justify-between hover:shadow-md transition-shadow overflow-hidden w-full relative group">
             <div className="flex justify-between items-start mb-2 gap-2">
@@ -1026,7 +1106,16 @@ function KPICard({ title, val, format = 'num', onDownload }) {
                     </button>
                 )}
             </div>
-            <span className="text-xl sm:text-2xl xl:text-3xl font-black text-slate-800 tracking-tight truncate">{formatVal(val)}</span>
+            <div className="flex justify-between items-end gap-2">
+                <div className="flex flex-col min-w-0 flex-1">
+                    <span className="text-xs xl:text-sm font-semibold text-slate-400 line-through mb-1 truncate">{formatVal(valB)}</span>
+                    <span className="text-xl sm:text-2xl xl:text-3xl font-black text-slate-800 tracking-tight truncate">{formatVal(valA)}</span>
+                </div>
+                <div className={`px-2 py-1 rounded-full text-[10px] xl:text-xs font-bold whitespace-nowrap shrink-0
+                    ${isNeutral ? 'bg-slate-100 text-slate-500' : (isGood ? 'bg-[#eaffe0] text-[#3f9b00]' : 'bg-red-100 text-red-600')}`}>
+                    {deltaStr}
+                </div>
+            </div>
         </div>
     );
 }
