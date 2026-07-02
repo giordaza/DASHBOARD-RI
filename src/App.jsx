@@ -485,18 +485,19 @@ function Dashboard({ scriptsLoaded, onHome }) {
         [dataState]
     );
 
-    // --- datos filtrados ---
+    // --- datos filtrados (el mismo filtro aplica a ambas propuestas) ---
     const filteredN = useMemo(() => filterSide(dataState.bNuevas, dataState.dNuevas, filtersN), [dataState, filtersN]);
- 
+    const filteredA = useMemo(() => filterSide(dataState.bViejas, dataState.dViejas, filtersN), [dataState, filtersN]);
+
     // Filtrar los eliminados
     const filteredEliminados = useMemo(() => {
         if (!dataState.eliminados) return [];
         return dataState.eliminados.filter(r => rowMatches(r, filtersN));
     }, [dataState.eliminados, filtersN]);
 
-    // --- KPIs (Optimizada vs. total histórico de la Propuesta Anterior) ---
+    // --- KPIs (Optimizada vs. Anterior, ambas con el mismo filtro aplicado) ---
     const kpis = useMemo(() => {
-        const bV = dataState.bViejas || [], dV = dataState.dViejas || [];
+        const bV = filteredA.base, dV = filteredA.desp;
         const bN = filteredN.base, dN = filteredN.desp;
         const despSrcV = dV.length ? dV : bV;
         const despSrcN = dN.length ? dN : bN;
@@ -521,12 +522,12 @@ function Dashboard({ scriptsLoaded, onHome }) {
             impViejas: bV.reduce((s, r) => s + parseNum(get(r, F.impTotal)), 0),
             impNuevas: bN.reduce((s, r) => s + parseNum(get(r, F.impTotal)), 0)
         };
-    }, [dataState.bViejas, dataState.dViejas, filteredN]);
+    }, [filteredA, filteredN]);
 
     const summaryNuevas = useMemo(() => computeRouteSummary(filteredN.base, filteredN.desp, colorMapN), [filteredN, colorMapN]);
-    const summaryViejas = useMemo(() => computeRouteSummary(dataState.bViejas, dataState.dViejas, {}), [dataState.bViejas, dataState.dViejas]);
+    const summaryViejas = useMemo(() => computeRouteSummary(filteredA.base, filteredA.desp, {}), [filteredA]);
     const regionalNuevas = useMemo(() => computeRegionalSummary(filteredN.base, filteredN.desp), [filteredN]);
-    const regionalViejas = useMemo(() => computeRegionalSummary(dataState.bViejas, dataState.dViejas), [dataState.bViejas, dataState.dViejas]);
+    const regionalViejas = useMemo(() => computeRegionalSummary(filteredA.base, filteredA.desp), [filteredA]);
 
     // --- merged regional para exportación paramétrica ---
     const regionalMerged = useMemo(() => {
@@ -926,7 +927,7 @@ function Dashboard({ scriptsLoaded, onHome }) {
                 <div className="flex flex-col gap-4">
                     <FilterBar
                         title="Filtros · Propuesta Optimizada"
-                        subtitle="Aplican solo a esta propuesta (También afectan a Eliminados)"
+                        subtitle="También afectan a Eliminados y a la comparación con la Propuesta Anterior"
                         accent="border-t-4 border-t-[#56D400]"
                         baseRows={dataState.bNuevas}
                         filters={filtersN}
