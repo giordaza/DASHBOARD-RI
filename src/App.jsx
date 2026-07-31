@@ -1513,10 +1513,11 @@ function Programacion({ scriptsLoaded, onHome }) {
         });
         return [...vistos.values()];
     }, [filteredRows]);
-    // Lineas de secuencia solo cuando hay una Ciudad seleccionada (una sola zona
-    // geografica coherente); sin Ciudad, con rutas de varias ciudades a la vez,
-    // las lineas cruzan todo el mapa y no se leen — se muestran solo clusters.
-    const mostrarLineas = Boolean(filters.CIUDAD);
+    // Lineas de secuencia cuando el filtro ya acota a una zona/ruta coherente
+    // (Ciudad o Ruta General); sin ninguno de los dos, con rutas de muchas
+    // ciudades a la vez, las lineas cruzan todo el mapa y no se leen — ahi se
+    // muestran solo clusters.
+    const mostrarLineas = Boolean(filters.CIUDAD || filters.RUTA_GENERAL);
 
     const rowsToRender = filteredRows.slice(0, 500);
 
