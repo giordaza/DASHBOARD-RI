@@ -379,7 +379,7 @@ function Logos({ h = 32 }) {
 //  COMPONENTE PRINCIPAL
 // =============================================================
 
-function Dashboard({ scriptsLoaded, onHome }) {
+function Dashboard({ scriptsLoaded, onHome, onProgramacion }) {
     const [status, setStatus] = useState('Esperando archivo Excel...');
     const [isLoading, setIsLoading] = useState(false);
     const [dataState, setDataState] = useState({ bNuevas: [], dNuevas: [], bViejas: [], dViejas: [], eliminados: [] });
@@ -864,6 +864,12 @@ function Dashboard({ scriptsLoaded, onHome }) {
                         <p className="text-slate-500 mt-1">Análisis de eficiencia, ocupación laboral y agrupación geoespacial.</p>
                     </div>
                     <div className="flex items-center gap-6">
+                        <button
+                            onClick={onProgramacion}
+                            className="px-5 py-3 rounded-lg font-bold text-sm border-2 border-[#56D400] text-[#2f8a00] hover:bg-[#56D400] hover:text-black transition-all shadow-sm shrink-0"
+                        >
+                            📋 Ver Programación de Rutas →
+                        </button>
                         <div className="flex flex-col items-center">
                             <div className="flex items-center gap-2">
                                 <label className={`cursor-pointer px-6 py-3 rounded-lg font-bold text-sm shadow-lg transition-all
@@ -1276,6 +1282,358 @@ function Portada({ onEnter, scriptsLoaded }) {
 }
 
 // =============================================================
+//  PROGRAMACIÓN DE RUTAS (esquema ArcGIS/VRP, organizado por día de visita)
+// =============================================================
+const DIAS_SEMANA = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'];
+
+function StatCard({ title, value, warn = false }) {
+    return (
+        <div className={`bg-white rounded-2xl p-4 shadow-sm border flex flex-col justify-between ${warn && value > 0 ? 'border-amber-300' : 'border-slate-200'}`}>
+            <h4 className="text-[10px] xl:text-xs font-bold text-slate-500 uppercase tracking-wide">{title}</h4>
+            <span className={`text-2xl xl:text-3xl font-black tracking-tight mt-1 ${warn && value > 0 ? 'text-amber-600' : 'text-slate-800'}`}>
+                {(value || 0).toLocaleString()}
+            </span>
+        </div>
+    );
+}
+
+// Máximo de puntos a graficar de una vez (evita saturar el navegador si no hay filtro).
+const MAX_MAP_POINTS = 900;
+
+// Mapa con la secuencia de visita: agrupa por Ruta, ordena por Secuencia y dibuja
+// una polilínea que conecta los puntos en el orden en que la ruta los visita.
+function ProgramacionMap({ rows }) {
+    const mapRef = useRef(null);
+    const mapInstance = useRef(null);
+    const layerGroupRef = useRef(null);
+
+    useEffect(() => {
+        if (!window.L || !mapRef.current || mapInstance.current) return;
+        mapInstance.current = window.L.map(mapRef.current, { preferCanvas: true }).setView([4.6097, -74.0817], 5);
+        window.L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 })
+            .addTo(mapInstance.current);
+        layerGroupRef.current = window.L.layerGroup().addTo(mapInstance.current);
+        return () => { if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; } };
+    }, []);
+
+    useEffect(() => {
+        if (!mapInstance.current || !window.L || !layerGroupRef.current) return;
+        layerGroupRef.current.clearLayers();
+
+        const withCoords = (rows || []).filter((r) => isFinite(parseCoord(r.Latitud)) && isFinite(parseCoord(r.Longitud)));
+        if (!withCoords.length) return;
+
+        const colorMap = buildColorMap(withCoords.map((r) => r.RouteName).filter(Boolean));
+
+        const byRoute = {};
+        withCoords.forEach((r) => {
+            const rn = String(r.RouteName || 'SIN RUTA').trim();
+            (byRoute[rn] = byRoute[rn] || []).push(r);
+        });
+
+        const lats = [], lngs = [];
+        Object.entries(byRoute).forEach(([rn, pts]) => {
+            const sorted = [...pts].sort((a, b) => parseNum(a.Sequence) - parseNum(b.Sequence));
+            const color = colorMap[rn] || stringToColor(rn);
+            const latlngs = [];
+            sorted.forEach((r) => {
+                const lat = parseCoord(r.Latitud), lng = parseCoord(r.Longitud);
+                lats.push(lat); lngs.push(lng);
+                latlngs.push([lat, lng]);
+                window.L.circleMarker([lat, lng], { color: '#ffffff', fillColor: color, weight: 1, fillOpacity: 0.9, radius: 5 })
+                    .bindPopup(
+                        `<b>Ruta:</b> ${rn}<br/>` +
+                        `<b>Secuencia:</b> ${r.Sequence !== '' && r.Sequence != null ? r.Sequence : 'N/A'}<br/>` +
+                        `<b>PDV:</b> ${r.Name || 'N/A'}<br/>` +
+                        `<b>Día:</b> ${r.Dia || 'N/A'}`
+                    )
+                    .addTo(layerGroupRef.current);
+            });
+            if (latlngs.length > 1) {
+                window.L.polyline(latlngs, { color, weight: 2.5, opacity: 0.75 }).addTo(layerGroupRef.current);
+            }
+        });
+
+        if (lats.length > 0) {
+            mapInstance.current.fitBounds(
+                [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]],
+                { padding: [40, 40], maxZoom: 15 }
+            );
+        }
+    }, [rows]);
+
+    return <div ref={mapRef} className="w-full h-full bg-slate-100 z-0 relative" />;
+}
+
+function Programacion({ scriptsLoaded, onHome }) {
+    const [status, setStatus] = useState('Esperando archivo...');
+    const [isLoading, setIsLoading] = useState(false);
+    const [autoLoaded, setAutoLoaded] = useState(false);
+    const [rows, setRows] = useState([]);
+    const [pending, setPending] = useState([]);
+    const [filters, setFilters] = useState({ DIA: '', CIUDAD: '', RUTA: '' });
+
+    const processBuffer = (buffer) => {
+        const wb = window.XLSX.read(buffer, { type: 'array' });
+        const progSheet = wb.SheetNames.find((n) => n.toUpperCase().includes('PROGRAMACION') || n.toUpperCase().includes('PROGRAMACIÓN'));
+        const pendSheet = wb.SheetNames.find((n) => n.toUpperCase().replace(/\s/g, '').includes('NOCOMPLETAD'));
+        const progRows = progSheet ? window.XLSX.utils.sheet_to_json(wb.Sheets[progSheet], { defval: '' }) : [];
+        const pendRows = pendSheet ? window.XLSX.utils.sheet_to_json(wb.Sheets[pendSheet], { defval: '' }) : [];
+        setRows(progRows);
+        setPending(pendRows);
+        setFilters({ DIA: '', CIUDAD: '', RUTA: '' });
+    };
+
+    useEffect(() => {
+        if (!scriptsLoaded || autoLoaded) return;
+        const fetchExcel = async () => {
+            try {
+                setIsLoading(true);
+                setStatus('⏳ Auto-cargando programación...');
+                const response = await fetch('/Programacion_Consolidada.xlsx?t=' + new Date().getTime(), { cache: 'no-store' });
+                if (!response.ok) throw new Error(`HTTP ${response.status} (No encontrado)`);
+                const arrayBuffer = await response.arrayBuffer();
+                processBuffer(arrayBuffer);
+                setStatus('✅ ¡Programación cargada!');
+                setTimeout(() => setStatus('Datos listos'), 3000);
+            } catch (err) {
+                console.warn('Fallo auto-carga de programación:', err);
+                setStatus(`⚠️ Falló: ${err.message}`);
+            } finally {
+                setIsLoading(false);
+                setAutoLoaded(true);
+            }
+        };
+        fetchExcel();
+    }, [scriptsLoaded, autoLoaded]);
+
+    const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file || !window.XLSX) return;
+        setIsLoading(true);
+        setStatus('⏳ Leyendo archivo Excel...');
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                processBuffer(new Uint8Array(evt.target.result));
+                setStatus('✅ ¡Programación actualizada!');
+                setTimeout(() => setStatus('Datos cargados'), 3000);
+            } catch (err) {
+                console.error('Error parsing Excel:', err);
+                setStatus('❌ Error al procesar el archivo');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+        e.target.value = '';
+    };
+
+    const diasDisponibles = useMemo(
+        () => [...new Set(rows.map((r) => String(r.Dia ?? '').trim()).filter(Boolean))]
+            .sort((a, b) => DIAS_SEMANA.indexOf(a) - DIAS_SEMANA.indexOf(b)),
+        [rows]
+    );
+    const ciudadesDisponibles = useMemo(
+        () => [...new Set(rows.map((r) => String(r.Ciudad ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')),
+        [rows]
+    );
+    const rutasDisponibles = useMemo(() => {
+        const base = filters.CIUDAD ? rows.filter((r) => String(r.Ciudad ?? '').trim() === filters.CIUDAD) : rows;
+        return [...new Set(base.map((r) => String(r.RouteName ?? '').trim()).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
+    }, [rows, filters.CIUDAD]);
+
+    const filteredRows = useMemo(() => rows.filter((r) => {
+        if (filters.DIA && String(r.Dia ?? '').trim() !== filters.DIA) return false;
+        if (filters.CIUDAD && String(r.Ciudad ?? '').trim() !== filters.CIUDAD) return false;
+        if (filters.RUTA && String(r.RouteName ?? '').trim() !== filters.RUTA) return false;
+        return true;
+    }), [rows, filters]);
+
+    const kpis = useMemo(() => ({
+        pdv: filteredRows.length,
+        rutas: new Set(filteredRows.map((r) => r.RouteName).filter(Boolean)).size,
+        ciudades: new Set(filteredRows.map((r) => r.Ciudad).filter(Boolean)).size,
+        sinDia: filteredRows.filter((r) => !String(r.Dia ?? '').trim()).length,
+        pendientes: pending.length,
+    }), [filteredRows, pending]);
+
+    const rowsConCoordenadas = useMemo(
+        () => filteredRows.filter((r) => isFinite(parseCoord(r.Latitud)) && isFinite(parseCoord(r.Longitud))),
+        [filteredRows]
+    );
+    const mapaDemasiadoDenso = rowsConCoordenadas.length > MAX_MAP_POINTS;
+
+    const rowsToRender = filteredRows.slice(0, 500);
+
+    return (
+        <div className="min-h-screen bg-slate-100 font-sans p-6 overflow-x-hidden flex justify-center">
+            <div className="w-full max-w-[1800px] flex flex-col gap-6">
+                {/* HEADER */}
+                <header className="bg-white rounded-2xl p-6 shadow-sm flex flex-wrap gap-4 justify-between items-center border border-slate-200">
+                    <div className="flex flex-col items-start">
+                        <button onClick={onHome} className="text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors mb-1">
+                            ← Volver al Dashboard
+                        </button>
+                        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Programación de Rutas por Día de Visita</h1>
+                        <p className="text-slate-500 mt-1">Consolidado de las órdenes VRP (ArcGIS) de cada ciudad: día, ruta, secuencia y punto de venta.</p>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-2">
+                                <label className={`cursor-pointer px-6 py-3 rounded-lg font-bold text-sm shadow-lg transition-all
+                                    ${!scriptsLoaded || isLoading ? 'bg-yellow-400 text-white cursor-not-allowed' : 'bg-[#56D400] text-black hover:scale-105 hover:shadow-xl'}`}>
+                                    {isLoading ? '⏳ Procesando...' : (!scriptsLoaded ? '⏳ Cargando entorno...' : '📥 Cargar Excel (.xlsx)')}
+                                    <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleFileUpload} disabled={!scriptsLoaded || isLoading} />
+                                </label>
+                                <button
+                                    onClick={() => setAutoLoaded(false)}
+                                    disabled={!scriptsLoaded || isLoading}
+                                    title="Volver a leer /Programacion_Consolidada.xlsx del servidor"
+                                    className="px-4 py-3 rounded-lg font-bold text-sm border border-slate-300 text-slate-600 hover:bg-slate-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    🔄 Recargar
+                                </button>
+                            </div>
+                            <span className="text-xs text-slate-500 mt-2 font-medium">{status}</span>
+                        </div>
+                        <Logos h={30} />
+                    </div>
+                </header>
+
+                {/* KPIS */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <StatCard title="PDV Programados" value={kpis.pdv} />
+                    <StatCard title="Rutas" value={kpis.rutas} />
+                    <StatCard title="Ciudades" value={kpis.ciudades} />
+                    <StatCard title="Sin Día Asignado" value={kpis.sinDia} warn />
+                    <StatCard title="No Completados (histórico)" value={kpis.pendientes} warn />
+                </div>
+
+                {/* FILTROS */}
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
+                    <div className="flex items-center justify-between mb-3 gap-2">
+                        <h4 className="text-sm font-bold text-slate-800">Filtros</h4>
+                        <button
+                            onClick={() => setFilters({ DIA: '', CIUDAD: '', RUTA: '' })}
+                            disabled={!filters.DIA && !filters.CIUDAD && !filters.RUTA}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            Limpiar
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Día de visita</label>
+                            <select
+                                value={filters.DIA}
+                                onChange={(e) => setFilters((f) => ({ ...f, DIA: e.target.value }))}
+                                className="border border-slate-300 rounded-lg px-2 py-2 text-xs text-slate-700 bg-white focus:ring-2 focus:ring-[#56D400] focus:border-[#56D400] outline-none"
+                            >
+                                <option value="">Todos los días</option>
+                                {diasDisponibles.map((d) => <option key={d} value={d}>{d}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ciudad</label>
+                            <select
+                                value={filters.CIUDAD}
+                                onChange={(e) => setFilters((f) => ({ ...f, CIUDAD: e.target.value, RUTA: '' }))}
+                                className="border border-slate-300 rounded-lg px-2 py-2 text-xs text-slate-700 bg-white focus:ring-2 focus:ring-[#56D400] focus:border-[#56D400] outline-none"
+                            >
+                                <option value="">Todas las ciudades</option>
+                                {ciudadesDisponibles.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ruta</label>
+                            <select
+                                value={filters.RUTA}
+                                onChange={(e) => setFilters((f) => ({ ...f, RUTA: e.target.value }))}
+                                className="border border-slate-300 rounded-lg px-2 py-2 text-xs text-slate-700 bg-white focus:ring-2 focus:ring-[#56D400] focus:border-[#56D400] outline-none"
+                            >
+                                <option value="">Todas las rutas</option>
+                                {rutasDisponibles.map((r) => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                {/* MAPA · SECUENCIA DE VISITA */}
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 h-[560px] flex flex-col border-t-4 border-t-[#56D400]">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-800">Mapa · Secuencia de Visita</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                                Cada color es una ruta; la línea conecta los puntos en el orden real de visita (Secuencia). Coordenadas tomadas del ejercicio de ArcGIS.
+                            </p>
+                        </div>
+                        <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap shrink-0">
+                            {rowsConCoordenadas.length.toLocaleString()} puntos ubicados
+                        </span>
+                    </div>
+                    <div className="flex-grow rounded-xl overflow-hidden bg-slate-100 relative z-0">
+                        {!scriptsLoaded ? (
+                            <div className="w-full h-full flex items-center justify-center text-slate-400">Cargando mapa...</div>
+                        ) : mapaDemasiadoDenso ? (
+                            <div className="w-full h-full flex items-center justify-center text-center text-slate-500 text-sm px-8">
+                                Hay {rowsConCoordenadas.length.toLocaleString()} puntos con los filtros actuales — es demasiado para graficar de una vez.
+                                <br />Filtra por Ciudad y/o Día (idealmente también por Ruta) para ver el mapa y la secuencia de visita.
+                            </div>
+                        ) : rowsConCoordenadas.length === 0 ? (
+                            <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Sin puntos con coordenada para los filtros actuales.</div>
+                        ) : (
+                            <ProgramacionMap rows={rowsConCoordenadas} />
+                        )}
+                    </div>
+                </div>
+
+                {/* TABLA */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col max-h-[640px]">
+                    <div className="px-5 pt-5 pb-3 border-b border-slate-100 shrink-0 flex justify-between items-center gap-2">
+                        <h3 className="text-lg font-bold text-slate-800">Detalle de Programación</h3>
+                        <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap">
+                            Mostrando {Math.min(500, filteredRows.length)} de {filteredRows.length}
+                        </span>
+                    </div>
+                    <div className="overflow-y-auto flex-1 px-5 pb-4">
+                        <table className="w-full text-left">
+                            <thead className="sticky top-0 z-20">
+                                <tr className="text-xs uppercase text-slate-500">
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Día</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ciudad</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ruta</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">Secuencia</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Punto de Venta</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">Servicio (min)</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Semana</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rowsToRender.length === 0 ? (
+                                    <tr><td colSpan={7} className="p-6 text-center text-slate-400 text-sm">Sin datos con los filtros actuales.</td></tr>
+                                ) : rowsToRender.map((r, i) => (
+                                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                                        <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.Dia || '—'}</td>
+                                        <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.Ciudad || '—'}</td>
+                                        <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.RouteName || '—'}</td>
+                                        <td className="p-3 text-sm text-center text-slate-600">{r.Sequence !== '' ? r.Sequence : '—'}</td>
+                                        <td className="p-3 text-sm text-slate-800">{r.Name || '—'}</td>
+                                        <td className="p-3 text-sm text-center text-slate-600">{r.ServiceTime !== '' ? r.ServiceTime : '—'}</td>
+                                        <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{r.Semana || '—'}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// =============================================================
 //  RAÍZ
 // =============================================================
 export default function App() {
@@ -1301,5 +1659,8 @@ export default function App() {
     if (view === 'portada') {
         return <Portada onEnter={() => setView('dashboard')} scriptsLoaded={scriptsLoaded} />;
     }
-    return <Dashboard scriptsLoaded={scriptsLoaded} onHome={() => setView('portada')} />;
+    if (view === 'programacion') {
+        return <Programacion scriptsLoaded={scriptsLoaded} onHome={() => setView('dashboard')} />;
+    }
+    return <Dashboard scriptsLoaded={scriptsLoaded} onHome={() => setView('portada')} onProgramacion={() => setView('programacion')} />;
 }
