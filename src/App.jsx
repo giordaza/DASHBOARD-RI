@@ -1477,18 +1477,18 @@ function Programacion({ scriptsLoaded, onHome }) {
         hrsDesplazamiento: filteredRows.reduce((s, r) => s + parseNum(r.FromPrevTravelTime), 0) / 60,
     }), [filteredRows]);
 
-    // Mapa: siempre muestra los PDV unicos (uno por Name), sin depender de los
-    // filtros de Dia/Semana/Ciudad/Ruta General (esos solo afectan la tabla y el
-    // resumen por ruta).
+    // Mapa: PDV unicos (uno por Name) dentro de las filas ya filtradas por
+    // Dia/Semana/Ciudad/Ruta General, para no inflar el conteo si un mismo PDV
+    // se repite en varias semanas dentro del filtro actual.
     const pdvUnicosMapa = useMemo(() => {
         const vistos = new Map();
-        rows.forEach((r) => {
+        filteredRows.forEach((r) => {
             if (!r.Name || vistos.has(r.Name)) return;
             if (!isFinite(parseCoord(r.Latitud)) || !isFinite(parseCoord(r.Longitud))) return;
             vistos.set(r.Name, r);
         });
         return [...vistos.values()];
-    }, [rows]);
+    }, [filteredRows]);
 
     const rowsToRender = filteredRows.slice(0, 500);
 
@@ -1597,13 +1597,13 @@ function Programacion({ scriptsLoaded, onHome }) {
                     </div>
                 </div>
 
-                {/* MAPA · TODOS LOS PDV (no depende de los filtros de arriba) */}
+                {/* MAPA · PDV UNICOS SEGUN LOS FILTROS ACTIVOS */}
                 <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 h-[560px] flex flex-col border-t-4 border-t-[#56D400]">
                     <div className="flex items-center justify-between mb-3">
                         <div>
                             <h3 className="text-lg font-bold text-slate-800">Mapa · Puntos de Venta</h3>
                             <p className="text-xs text-slate-500 mt-0.5">
-                                Todos los PDV únicos programados, coloreados y conectados por ruta (secuencia de visita). Coordenadas tomadas del ejercicio de ArcGIS. No depende de los filtros.
+                                PDV únicos según los filtros de arriba, coloreados y conectados por ruta (secuencia de visita). Coordenadas tomadas del ejercicio de ArcGIS.
                             </p>
                         </div>
                         <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap shrink-0">
