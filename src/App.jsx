@@ -1258,7 +1258,7 @@ function Portada({ onEnter, scriptsLoaded }) {
                                 onClick={onEnter}
                                 className="px-9 py-4 rounded-xl bg-[#56D400] text-black font-extrabold text-lg shadow-[0_10px_40px_-10px_rgba(86,212,0,0.7)] hover:scale-105 hover:shadow-[0_16px_55px_-10px_rgba(86,212,0,0.95)] transition-all duration-200"
                             >
-                                Entrar al Dashboard →
+                                Ver Programación de Rutas →
                             </button>
                             <span className="text-sm text-slate-500">Cobertura nacional · Colombia</span>
                         </div>
@@ -1738,7 +1738,7 @@ export default function App() {
         ]).then(() => setScriptsLoaded(true));
     }, []);
     if (view === 'portada') {
-        return <Portada onEnter={() => setView('dashboard')} scriptsLoaded={scriptsLoaded} />;
+        return <Portada onEnter={() => setView('programacion')} scriptsLoaded={scriptsLoaded} />;
     }
     if (view === 'programacion') {
         return <Programacion scriptsLoaded={scriptsLoaded} onHome={() => setView('dashboard')} />;
