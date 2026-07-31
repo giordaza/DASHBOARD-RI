@@ -1301,6 +1301,11 @@ function StatCard({ title, value, warn = false, format = 'num' }) {
 // Máximo de puntos a graficar de una vez (evita saturar el navegador si no hay filtro).
 const MAX_MAP_POINTS = 900;
 
+// Filtro inicial al cargar (para que el mapa muestre algo manejable de entrada,
+// en vez de los ~7.800 puntos de todo el país sin filtrar). El botón "Limpiar"
+// sí deja los filtros completamente vacíos.
+const DEFAULT_FILTERS = { DIA: 'LUNES', SEMANA: 'Semana1', CIUDAD: '', RUTA_GENERAL: '' };
+
 // Mapa con la secuencia de visita: agrupa por Ruta, ordena por Secuencia y dibuja
 // una polilínea que conecta los puntos en el orden en que la ruta los visita.
 function ProgramacionMap({ rows }) {
@@ -1372,7 +1377,7 @@ function Programacion({ scriptsLoaded, onHome }) {
     const [autoLoaded, setAutoLoaded] = useState(false);
     const [rows, setRows] = useState([]);
     const [resumenRutas, setResumenRutas] = useState([]);
-    const [filters, setFilters] = useState({ DIA: '', SEMANA: '', CIUDAD: '', RUTA_GENERAL: '' });
+    const [filters, setFilters] = useState(DEFAULT_FILTERS);
 
     const processBuffer = (buffer) => {
         const wb = window.XLSX.read(buffer, { type: 'array' });
@@ -1382,7 +1387,7 @@ function Programacion({ scriptsLoaded, onHome }) {
         const resumenRows = resumenSheet ? window.XLSX.utils.sheet_to_json(wb.Sheets[resumenSheet], { defval: '' }) : [];
         setRows(progRows);
         setResumenRutas(resumenRows);
-        setFilters({ DIA: '', SEMANA: '', CIUDAD: '', RUTA_GENERAL: '' });
+        setFilters(DEFAULT_FILTERS);
     };
 
     useEffect(() => {
