@@ -1467,8 +1467,7 @@ function Programacion({ scriptsLoaded, onHome }) {
     }), [resumenRutas, filters]);
 
     const kpis = useMemo(() => ({
-        pdvTotal: new Set(filteredRows.map((r) => r.Name).filter(Boolean)).size,
-        frecuencia: filteredRows.length,
+        pdv: new Set(filteredRows.map((r) => r.Name).filter(Boolean)).size,
         rutas: new Set(filteredRows.map((r) => r.RutaGeneral).filter(Boolean)).size,
         ciudades: new Set(filteredRows.map((r) => r.Ciudad).filter(Boolean)).size,
         hrsPDV: filteredRows.reduce((s, r) => s + parseNum(r.ServiceTime), 0) / 60,
@@ -1519,9 +1518,8 @@ function Programacion({ scriptsLoaded, onHome }) {
                 </header>
 
                 {/* KPIS */}
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-                    <StatCard title="Total PDV" value={kpis.pdvTotal} />
-                    <StatCard title="Frecuencia (Visitas)" value={kpis.frecuencia} />
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+                    <StatCard title="PDV Programados" value={kpis.pdv} />
                     <StatCard title="Rutas" value={kpis.rutas} />
                     <StatCard title="Ciudades" value={kpis.ciudades} />
                     <StatCard title="Horas en PDV" value={kpis.hrsPDV} format="hrs" />
