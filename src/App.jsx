@@ -1305,7 +1305,7 @@ const DEFAULT_FILTERS = { DIA: 'LUNES', SEMANA: 'Semana1', CIUDAD: '', RUTA_GENE
 
 // Mapa con la secuencia de visita: agrupa por Ruta, ordena por Secuencia y dibuja
 // una polilínea que conecta los puntos en el orden en que la ruta los visita.
-function ProgramacionMap({ rows }) {
+function ProgramacionMap({ rows, showLines = true }) {
     const mapRef = useRef(null);
     const mapInstance = useRef(null);
     const layerGroupRef = useRef(null);
@@ -1315,47 +1315,71 @@ function ProgramacionMap({ rows }) {
         mapInstance.current = window.L.map(mapRef.current, { preferCanvas: true }).setView([4.6097, -74.0817], 5);
         window.L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 })
             .addTo(mapInstance.current);
-        layerGroupRef.current = window.L.layerGroup().addTo(mapInstance.current);
         return () => { if (mapInstance.current) { mapInstance.current.remove(); mapInstance.current = null; } };
     }, []);
 
     useEffect(() => {
-        if (!mapInstance.current || !window.L || !layerGroupRef.current) return;
-        layerGroupRef.current.clearLayers();
+        if (!mapInstance.current || !window.L) return;
+        if (layerGroupRef.current) {
+            mapInstance.current.removeLayer(layerGroupRef.current);
+            layerGroupRef.current = null;
+        }
 
         const withCoords = (rows || []).filter((r) => isFinite(parseCoord(r.Latitud)) && isFinite(parseCoord(r.Longitud)));
         if (!withCoords.length) return;
 
-        const colorMap = buildColorMap(withCoords.map((r) => r.RouteName).filter(Boolean));
-
-        const byRoute = {};
-        withCoords.forEach((r) => {
-            const rn = String(r.RouteName || 'SIN RUTA').trim();
-            (byRoute[rn] = byRoute[rn] || []).push(r);
-        });
-
         const lats = [], lngs = [];
-        Object.entries(byRoute).forEach(([rn, pts]) => {
-            const sorted = [...pts].sort((a, b) => parseNum(a.Sequence) - parseNum(b.Sequence));
-            const color = colorMap[rn] || stringToColor(rn);
-            const latlngs = [];
-            sorted.forEach((r) => {
+
+        // Sin filtro: solo clusters (puntos agrupados por cercania), sin lineas de
+        // secuencia — con miles de PDV de todo el pais, las lineas y puntos sueltos
+        // no se leen. Con filtro: puntos por ruta + linea de secuencia de visita.
+        if (!showLines && window.L.markerClusterGroup) {
+            const cluster = window.L.markerClusterGroup();
+            withCoords.forEach((r) => {
                 const lat = parseCoord(r.Latitud), lng = parseCoord(r.Longitud);
                 lats.push(lat); lngs.push(lng);
-                latlngs.push([lat, lng]);
-                window.L.circleMarker([lat, lng], { color: '#ffffff', fillColor: color, weight: 1, fillOpacity: 0.9, radius: 5 })
+                window.L.marker([lat, lng])
                     .bindPopup(
-                        `<b>Ruta:</b> ${rn}<br/>` +
-                        `<b>Secuencia:</b> ${r.Sequence !== '' && r.Sequence != null ? r.Sequence : 'N/A'}<br/>` +
                         `<b>PDV:</b> ${r.Name || 'N/A'}<br/>` +
-                        `<b>Día:</b> ${r.Dia || 'N/A'}`
+                        `<b>Ciudad:</b> ${r.Ciudad || 'N/A'}<br/>` +
+                        `<b>Ruta General:</b> ${r.RutaGeneral || 'N/A'}`
                     )
-                    .addTo(layerGroupRef.current);
+                    .addTo(cluster);
             });
-            if (latlngs.length > 1) {
-                window.L.polyline(latlngs, { color, weight: 2.5, opacity: 0.75 }).addTo(layerGroupRef.current);
-            }
-        });
+            cluster.addTo(mapInstance.current);
+            layerGroupRef.current = cluster;
+        } else {
+            const layerGroup = window.L.layerGroup();
+            const colorMap = buildColorMap(withCoords.map((r) => r.RouteName).filter(Boolean));
+            const byRoute = {};
+            withCoords.forEach((r) => {
+                const rn = String(r.RouteName || 'SIN RUTA').trim();
+                (byRoute[rn] = byRoute[rn] || []).push(r);
+            });
+            Object.entries(byRoute).forEach(([rn, pts]) => {
+                const sorted = [...pts].sort((a, b) => parseNum(a.Sequence) - parseNum(b.Sequence));
+                const color = colorMap[rn] || stringToColor(rn);
+                const latlngs = [];
+                sorted.forEach((r) => {
+                    const lat = parseCoord(r.Latitud), lng = parseCoord(r.Longitud);
+                    lats.push(lat); lngs.push(lng);
+                    latlngs.push([lat, lng]);
+                    window.L.circleMarker([lat, lng], { color: '#ffffff', fillColor: color, weight: 1, fillOpacity: 0.9, radius: 5 })
+                        .bindPopup(
+                            `<b>Ruta:</b> ${rn}<br/>` +
+                            `<b>Secuencia:</b> ${r.Sequence !== '' && r.Sequence != null ? r.Sequence : 'N/A'}<br/>` +
+                            `<b>PDV:</b> ${r.Name || 'N/A'}<br/>` +
+                            `<b>Día:</b> ${r.Dia || 'N/A'}`
+                        )
+                        .addTo(layerGroup);
+                });
+                if (latlngs.length > 1) {
+                    window.L.polyline(latlngs, { color, weight: 2.5, opacity: 0.75 }).addTo(layerGroup);
+                }
+            });
+            layerGroup.addTo(mapInstance.current);
+            layerGroupRef.current = layerGroup;
+        }
 
         if (lats.length > 0) {
             mapInstance.current.fitBounds(
@@ -1363,7 +1387,7 @@ function ProgramacionMap({ rows }) {
                 { padding: [40, 40], maxZoom: 15 }
             );
         }
-    }, [rows]);
+    }, [rows, showLines]);
 
     return <div ref={mapRef} className="w-full h-full bg-slate-100 z-0 relative" />;
 }
@@ -1489,6 +1513,10 @@ function Programacion({ scriptsLoaded, onHome }) {
         });
         return [...vistos.values()];
     }, [filteredRows]);
+    // Lineas de secuencia solo cuando hay una Ciudad seleccionada (una sola zona
+    // geografica coherente); sin Ciudad, con rutas de varias ciudades a la vez,
+    // las lineas cruzan todo el mapa y no se leen — se muestran solo clusters.
+    const mostrarLineas = Boolean(filters.CIUDAD);
 
     const rowsToRender = filteredRows.slice(0, 500);
 
@@ -1603,7 +1631,10 @@ function Programacion({ scriptsLoaded, onHome }) {
                         <div>
                             <h3 className="text-lg font-bold text-slate-800">Mapa · Puntos de Venta</h3>
                             <p className="text-xs text-slate-500 mt-0.5">
-                                PDV únicos según los filtros de arriba, coloreados y conectados por ruta (secuencia de visita). Coordenadas tomadas del ejercicio de ArcGIS.
+                                {mostrarLineas
+                                    ? 'PDV únicos según los filtros de arriba, coloreados y conectados por ruta (secuencia de visita).'
+                                    : 'PDV únicos agrupados en clusters. Selecciona una Ciudad para ver las rutas y su secuencia de visita.'}
+                                {' '}Coordenadas tomadas del ejercicio de ArcGIS.
                             </p>
                         </div>
                         <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap shrink-0">
@@ -1616,7 +1647,7 @@ function Programacion({ scriptsLoaded, onHome }) {
                         ) : pdvUnicosMapa.length === 0 ? (
                             <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Sin puntos con coordenada.</div>
                         ) : (
-                            <ProgramacionMap rows={pdvUnicosMapa} />
+                            <ProgramacionMap rows={pdvUnicosMapa} showLines={mostrarLineas} />
                         )}
                     </div>
                 </div>
@@ -1723,14 +1754,18 @@ export default function App() {
             const s = document.createElement('script');
             s.src = src; s.onload = resolve; document.head.appendChild(s);
         });
-        if (!document.getElementById('leaflet-css')) {
+        const loadCss = (id, href) => {
+            if (document.getElementById(id)) return;
             const link = document.createElement('link');
-            link.id = 'leaflet-css'; link.rel = 'stylesheet';
-            link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+            link.id = id; link.rel = 'stylesheet'; link.href = href;
             document.head.appendChild(link);
-        }
+        };
+        loadCss('leaflet-css', 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+        loadCss('leaflet-cluster-css', 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css');
+        loadCss('leaflet-cluster-default-css', 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css');
         Promise.all([
-            loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'),
+            loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js')
+                .then(() => loadScript('https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js')),
             loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js')
         ]).then(() => setScriptsLoaded(true));
     }, []);
