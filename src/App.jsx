@@ -866,7 +866,7 @@ function Dashboard({ scriptsLoaded, onHome, onProgramacion }) {
                     <div className="flex items-center gap-6">
                         <button
                             onClick={onProgramacion}
-                            className="px-5 py-3 rounded-lg font-bold text-sm border-2 border-[#56D400] text-[#2f8a00] hover:bg-[#56D400] hover:text-black transition-all shadow-sm shrink-0"
+                            className="self-start px-5 py-3 rounded-lg font-bold text-sm border-2 border-[#56D400] text-[#2f8a00] hover:bg-[#56D400] hover:text-black transition-all shadow-sm shrink-0"
                         >
                             📋 Ver Programación de Rutas →
                         </button>
@@ -1468,7 +1468,7 @@ function Programacion({ scriptsLoaded, onHome }) {
 
     const kpis = useMemo(() => ({
         pdv: filteredRows.length,
-        rutas: new Set(filteredRows.map((r) => r.RouteName).filter(Boolean)).size,
+        rutas: new Set(filteredRows.map((r) => r.RutaGeneral).filter(Boolean)).size,
         ciudades: new Set(filteredRows.map((r) => r.Ciudad).filter(Boolean)).size,
         hrsPDV: filteredRows.reduce((s, r) => s + parseNum(r.ServiceTime), 0) / 60,
         hrsDesplazamiento: filteredRows.reduce((s, r) => s + parseNum(r.FromPrevTravelTime), 0) / 60,
