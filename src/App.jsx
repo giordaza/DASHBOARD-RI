@@ -1298,9 +1298,6 @@ function StatCard({ title, value, warn = false, format = 'num' }) {
     );
 }
 
-// Máximo de puntos a graficar de una vez (evita saturar el navegador si no hay filtro).
-const MAX_MAP_POINTS = 900;
-
 // Filtro inicial al cargar (para que el mapa muestre algo manejable de entrada,
 // en vez de los ~7.800 puntos de todo el país sin filtrar). El botón "Limpiar"
 // sí deja los filtros completamente vacíos.
@@ -1480,11 +1477,18 @@ function Programacion({ scriptsLoaded, onHome }) {
         hrsDesplazamiento: filteredRows.reduce((s, r) => s + parseNum(r.FromPrevTravelTime), 0) / 60,
     }), [filteredRows]);
 
-    const rowsConCoordenadas = useMemo(
-        () => filteredRows.filter((r) => isFinite(parseCoord(r.Latitud)) && isFinite(parseCoord(r.Longitud))),
-        [filteredRows]
-    );
-    const mapaDemasiadoDenso = rowsConCoordenadas.length > MAX_MAP_POINTS;
+    // Mapa: siempre muestra los PDV unicos (uno por Name), sin depender de los
+    // filtros de Dia/Semana/Ciudad/Ruta General (esos solo afectan la tabla y el
+    // resumen por ruta).
+    const pdvUnicosMapa = useMemo(() => {
+        const vistos = new Map();
+        rows.forEach((r) => {
+            if (!r.Name || vistos.has(r.Name)) return;
+            if (!isFinite(parseCoord(r.Latitud)) || !isFinite(parseCoord(r.Longitud))) return;
+            vistos.set(r.Name, r);
+        });
+        return [...vistos.values()];
+    }, [rows]);
 
     const rowsToRender = filteredRows.slice(0, 500);
 
@@ -1593,31 +1597,26 @@ function Programacion({ scriptsLoaded, onHome }) {
                     </div>
                 </div>
 
-                {/* MAPA · SECUENCIA DE VISITA */}
+                {/* MAPA · TODOS LOS PDV (no depende de los filtros de arriba) */}
                 <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 h-[560px] flex flex-col border-t-4 border-t-[#56D400]">
                     <div className="flex items-center justify-between mb-3">
                         <div>
-                            <h3 className="text-lg font-bold text-slate-800">Mapa · Secuencia de Visita</h3>
+                            <h3 className="text-lg font-bold text-slate-800">Mapa · Puntos de Venta</h3>
                             <p className="text-xs text-slate-500 mt-0.5">
-                                Cada color es una ruta; la línea conecta los puntos en el orden real de visita (Secuencia). Coordenadas tomadas del ejercicio de ArcGIS.
+                                Todos los PDV únicos programados, coloreados y conectados por ruta (secuencia de visita). Coordenadas tomadas del ejercicio de ArcGIS. No depende de los filtros.
                             </p>
                         </div>
                         <span className="text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full whitespace-nowrap shrink-0">
-                            {rowsConCoordenadas.length.toLocaleString()} puntos ubicados
+                            {pdvUnicosMapa.length.toLocaleString()} PDV únicos
                         </span>
                     </div>
                     <div className="flex-grow rounded-xl overflow-hidden bg-slate-100 relative z-0">
                         {!scriptsLoaded ? (
                             <div className="w-full h-full flex items-center justify-center text-slate-400">Cargando mapa...</div>
-                        ) : mapaDemasiadoDenso ? (
-                            <div className="w-full h-full flex items-center justify-center text-center text-slate-500 text-sm px-8">
-                                Hay {rowsConCoordenadas.length.toLocaleString()} puntos con los filtros actuales — es demasiado para graficar de una vez.
-                                <br />Filtra por Ciudad y/o Día (idealmente también por Ruta) para ver el mapa y la secuencia de visita.
-                            </div>
-                        ) : rowsConCoordenadas.length === 0 ? (
-                            <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Sin puntos con coordenada para los filtros actuales.</div>
+                        ) : pdvUnicosMapa.length === 0 ? (
+                            <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Sin puntos con coordenada.</div>
                         ) : (
-                            <ProgramacionMap rows={rowsConCoordenadas} />
+                            <ProgramacionMap rows={pdvUnicosMapa} />
                         )}
                     </div>
                 </div>
