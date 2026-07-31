@@ -1298,10 +1298,9 @@ function StatCard({ title, value, warn = false, format = 'num' }) {
     );
 }
 
-// Filtro inicial al cargar (para que el mapa muestre algo manejable de entrada,
-// en vez de los ~7.800 puntos de todo el país sin filtrar). El botón "Limpiar"
-// sí deja los filtros completamente vacíos.
-const DEFAULT_FILTERS = { DIA: 'LUNES', SEMANA: 'Semana1', CIUDAD: '', RUTA_GENERAL: '' };
+// Filtros vacíos al cargar: el mapa agrupa en clusters cuando no hay Ciudad ni
+// Ruta General seleccionada, así que no hace falta preseleccionar Día/Semana.
+const DEFAULT_FILTERS = { DIA: '', SEMANA: '', CIUDAD: '', RUTA_GENERAL: '' };
 
 // Mapa con la secuencia de visita: agrupa por Ruta, ordena por Secuencia y dibuja
 // una polilínea que conecta los puntos en el orden en que la ruta los visita.
