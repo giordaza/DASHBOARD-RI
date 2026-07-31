@@ -1495,7 +1495,7 @@ function Programacion({ scriptsLoaded, onHome }) {
                 <header className="bg-white rounded-2xl p-6 shadow-sm flex flex-wrap gap-4 justify-between items-center border border-slate-200">
                     <div className="flex flex-col items-start">
                         <button onClick={onHome} className="text-xs font-semibold text-slate-400 hover:text-slate-700 transition-colors mb-1">
-                            ← Volver al Dashboard
+                            ← Portada
                         </button>
                         <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Programación de Rutas por Día de Visita</h1>
                         <p className="text-slate-500 mt-1">Consolidado de las órdenes VRP (ArcGIS) de cada ciudad: día, ruta, secuencia y punto de venta.</p>
@@ -1741,7 +1741,7 @@ export default function App() {
         return <Portada onEnter={() => setView('programacion')} scriptsLoaded={scriptsLoaded} />;
     }
     if (view === 'programacion') {
-        return <Programacion scriptsLoaded={scriptsLoaded} onHome={() => setView('dashboard')} />;
+        return <Programacion scriptsLoaded={scriptsLoaded} onHome={() => setView('portada')} />;
     }
     return <Dashboard scriptsLoaded={scriptsLoaded} onHome={() => setView('portada')} onProgramacion={() => setView('programacion')} />;
 }
