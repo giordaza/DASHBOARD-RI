@@ -1371,22 +1371,18 @@ function Programacion({ scriptsLoaded, onHome }) {
     const [isLoading, setIsLoading] = useState(false);
     const [autoLoaded, setAutoLoaded] = useState(false);
     const [rows, setRows] = useState([]);
-    const [pending, setPending] = useState([]);
     const [resumenRutas, setResumenRutas] = useState([]);
-    const [filters, setFilters] = useState({ DIA: '', CIUDAD: '', RUTA_GENERAL: '', RUTA: '' });
+    const [filters, setFilters] = useState({ DIA: '', SEMANA: '', CIUDAD: '', RUTA_GENERAL: '' });
 
     const processBuffer = (buffer) => {
         const wb = window.XLSX.read(buffer, { type: 'array' });
         const progSheet = wb.SheetNames.find((n) => n.toUpperCase().includes('PROGRAMACION') || n.toUpperCase().includes('PROGRAMACIÓN'));
-        const pendSheet = wb.SheetNames.find((n) => n.toUpperCase().replace(/\s/g, '').includes('NOCOMPLETAD'));
         const resumenSheet = wb.SheetNames.find((n) => n.toUpperCase().replace(/[\s_]/g, '').includes('RESUMENRUTAS'));
         const progRows = progSheet ? window.XLSX.utils.sheet_to_json(wb.Sheets[progSheet], { defval: '' }) : [];
-        const pendRows = pendSheet ? window.XLSX.utils.sheet_to_json(wb.Sheets[pendSheet], { defval: '' }) : [];
         const resumenRows = resumenSheet ? window.XLSX.utils.sheet_to_json(wb.Sheets[resumenSheet], { defval: '' }) : [];
         setRows(progRows);
-        setPending(pendRows);
         setResumenRutas(resumenRows);
-        setFilters({ DIA: '', CIUDAD: '', RUTA_GENERAL: '', RUTA: '' });
+        setFilters({ DIA: '', SEMANA: '', CIUDAD: '', RUTA_GENERAL: '' });
     };
 
     useEffect(() => {
@@ -1448,26 +1444,25 @@ function Programacion({ scriptsLoaded, onHome }) {
         return [...new Set(base.map((r) => String(r.RutaGeneral ?? '').trim()).filter(Boolean))]
             .sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
     }, [rows, filters.CIUDAD]);
-    const rutasDisponibles = useMemo(() => {
-        let base = filters.CIUDAD ? rows.filter((r) => String(r.Ciudad ?? '').trim() === filters.CIUDAD) : rows;
-        if (filters.RUTA_GENERAL) base = base.filter((r) => String(r.RutaGeneral ?? '').trim() === filters.RUTA_GENERAL);
-        return [...new Set(base.map((r) => String(r.RouteName ?? '').trim()).filter(Boolean))]
-            .sort((a, b) => a.localeCompare(b, 'es', { numeric: true }));
-    }, [rows, filters.CIUDAD, filters.RUTA_GENERAL]);
+    const semanasDisponibles = useMemo(
+        () => [...new Set(rows.map((r) => String(r.Semana ?? '').trim()).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b, 'es', { numeric: true })),
+        [rows]
+    );
 
     const filteredRows = useMemo(() => rows.filter((r) => {
         if (filters.DIA && String(r.Dia ?? '').trim() !== filters.DIA) return false;
+        if (filters.SEMANA && String(r.Semana ?? '').trim() !== filters.SEMANA) return false;
         if (filters.CIUDAD && String(r.Ciudad ?? '').trim() !== filters.CIUDAD) return false;
         if (filters.RUTA_GENERAL && String(r.RutaGeneral ?? '').trim() !== filters.RUTA_GENERAL) return false;
-        if (filters.RUTA && String(r.RouteName ?? '').trim() !== filters.RUTA) return false;
         return true;
     }), [rows, filters]);
 
     const resumenFiltrado = useMemo(() => resumenRutas.filter((r) => {
         if (filters.DIA && String(r.Dia ?? '').trim() !== filters.DIA) return false;
+        if (filters.SEMANA && String(r.Semana ?? '').trim() !== filters.SEMANA) return false;
         if (filters.CIUDAD && String(r.Ciudad ?? '').trim() !== filters.CIUDAD) return false;
         if (filters.RUTA_GENERAL && String(r.RutaGeneral ?? '').trim() !== filters.RUTA_GENERAL) return false;
-        if (filters.RUTA && String(r.RouteName ?? '').trim() !== filters.RUTA) return false;
         return true;
     }), [resumenRutas, filters]);
 
@@ -1475,11 +1470,9 @@ function Programacion({ scriptsLoaded, onHome }) {
         pdv: filteredRows.length,
         rutas: new Set(filteredRows.map((r) => r.RouteName).filter(Boolean)).size,
         ciudades: new Set(filteredRows.map((r) => r.Ciudad).filter(Boolean)).size,
-        sinDia: filteredRows.filter((r) => !String(r.Dia ?? '').trim()).length,
-        pendientes: pending.length,
         hrsPDV: filteredRows.reduce((s, r) => s + parseNum(r.ServiceTime), 0) / 60,
         hrsDesplazamiento: filteredRows.reduce((s, r) => s + parseNum(r.FromPrevTravelTime), 0) / 60,
-    }), [filteredRows, pending]);
+    }), [filteredRows]);
 
     const rowsConCoordenadas = useMemo(
         () => filteredRows.filter((r) => isFinite(parseCoord(r.Latitud)) && isFinite(parseCoord(r.Longitud))),
@@ -1525,14 +1518,12 @@ function Programacion({ scriptsLoaded, onHome }) {
                 </header>
 
                 {/* KPIS */}
-                <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
                     <StatCard title="PDV Programados" value={kpis.pdv} />
                     <StatCard title="Rutas" value={kpis.rutas} />
                     <StatCard title="Ciudades" value={kpis.ciudades} />
                     <StatCard title="Horas en PDV" value={kpis.hrsPDV} format="hrs" />
                     <StatCard title="Horas Desplazamiento" value={kpis.hrsDesplazamiento} format="hrs" />
-                    <StatCard title="Sin Día Asignado" value={kpis.sinDia} warn />
-                    <StatCard title="No Completados (histórico)" value={kpis.pendientes} warn />
                 </div>
 
                 {/* FILTROS */}
@@ -1540,8 +1531,8 @@ function Programacion({ scriptsLoaded, onHome }) {
                     <div className="flex items-center justify-between mb-3 gap-2">
                         <h4 className="text-sm font-bold text-slate-800">Filtros</h4>
                         <button
-                            onClick={() => setFilters({ DIA: '', CIUDAD: '', RUTA_GENERAL: '', RUTA: '' })}
-                            disabled={!filters.DIA && !filters.CIUDAD && !filters.RUTA_GENERAL && !filters.RUTA}
+                            onClick={() => setFilters({ DIA: '', SEMANA: '', CIUDAD: '', RUTA_GENERAL: '' })}
+                            disabled={!filters.DIA && !filters.SEMANA && !filters.CIUDAD && !filters.RUTA_GENERAL}
                             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             Limpiar
@@ -1560,21 +1551,21 @@ function Programacion({ scriptsLoaded, onHome }) {
                             </select>
                         </div>
                         <div className="flex flex-col gap-1">
-                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ciudad</label>
+                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Semana</label>
                             <select
-                                value={filters.CIUDAD}
-                                onChange={(e) => setFilters((f) => ({ ...f, CIUDAD: e.target.value, RUTA_GENERAL: '', RUTA: '' }))}
+                                value={filters.SEMANA}
+                                onChange={(e) => setFilters((f) => ({ ...f, SEMANA: e.target.value }))}
                                 className="border border-slate-300 rounded-lg px-2 py-2 text-xs text-slate-700 bg-white focus:ring-2 focus:ring-[#56D400] focus:border-[#56D400] outline-none"
                             >
-                                <option value="">Todas las ciudades</option>
-                                {ciudadesDisponibles.map((c) => <option key={c} value={c}>{c}</option>)}
+                                <option value="">Todas las semanas</option>
+                                {semanasDisponibles.map((s) => <option key={s} value={s}>{s}</option>)}
                             </select>
                         </div>
                         <div className="flex flex-col gap-1">
                             <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ruta General</label>
                             <select
                                 value={filters.RUTA_GENERAL}
-                                onChange={(e) => setFilters((f) => ({ ...f, RUTA_GENERAL: e.target.value, RUTA: '' }))}
+                                onChange={(e) => setFilters((f) => ({ ...f, RUTA_GENERAL: e.target.value }))}
                                 className="border border-slate-300 rounded-lg px-2 py-2 text-xs text-slate-700 bg-white focus:ring-2 focus:ring-[#56D400] focus:border-[#56D400] outline-none"
                             >
                                 <option value="">Todas</option>
@@ -1582,14 +1573,14 @@ function Programacion({ scriptsLoaded, onHome }) {
                             </select>
                         </div>
                         <div className="flex flex-col gap-1">
-                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ruta (día específico)</label>
+                            <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ciudad</label>
                             <select
-                                value={filters.RUTA}
-                                onChange={(e) => setFilters((f) => ({ ...f, RUTA: e.target.value }))}
+                                value={filters.CIUDAD}
+                                onChange={(e) => setFilters((f) => ({ ...f, CIUDAD: e.target.value, RUTA_GENERAL: '' }))}
                                 className="border border-slate-300 rounded-lg px-2 py-2 text-xs text-slate-700 bg-white focus:ring-2 focus:ring-[#56D400] focus:border-[#56D400] outline-none"
                             >
-                                <option value="">Todas las rutas</option>
-                                {rutasDisponibles.map((r) => <option key={r} value={r}>{r}</option>)}
+                                <option value="">Todas las ciudades</option>
+                                {ciudadesDisponibles.map((c) => <option key={c} value={c}>{c}</option>)}
                             </select>
                         </div>
                     </div>
@@ -1685,6 +1676,7 @@ function Programacion({ scriptsLoaded, onHome }) {
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ciudad</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ruta General</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Día</th>
+                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Semana</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">PDV</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">Tiempo en PDV (h)</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">Desplazamiento (h)</th>
@@ -1693,12 +1685,13 @@ function Programacion({ scriptsLoaded, onHome }) {
                             </thead>
                             <tbody>
                                 {resumenFiltrado.length === 0 ? (
-                                    <tr><td colSpan={7} className="p-6 text-center text-slate-400 text-sm">Sin datos con los filtros actuales.</td></tr>
+                                    <tr><td colSpan={8} className="p-6 text-center text-slate-400 text-sm">Sin datos con los filtros actuales.</td></tr>
                                 ) : resumenFiltrado.map((r, i) => (
                                     <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                                         <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.Ciudad || '—'}</td>
                                         <td className="p-3 text-sm font-semibold text-slate-700 whitespace-nowrap">{r.RutaGeneral || '—'}</td>
                                         <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.Dia || '—'}</td>
+                                        <td className="p-3 text-sm text-slate-600 whitespace-nowrap">{r.Semana || '—'}</td>
                                         <td className="p-3 text-sm text-center text-slate-600">{r.PDV ?? '—'}</td>
                                         <td className="p-3 text-sm text-center text-slate-600">{parseNum(r.TiempoPDV_hrs).toFixed(1)}</td>
                                         <td className="p-3 text-sm text-center text-slate-600">{parseNum(r.Desplazamiento_hrs).toFixed(1)}</td>
