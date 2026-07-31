@@ -1637,7 +1637,6 @@ function Programacion({ scriptsLoaded, onHome }) {
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Día</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ciudad</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ruta General</th>
-                                    <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Ruta</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">Secuencia</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200">Punto de Venta</th>
                                     <th className="p-3 font-semibold bg-slate-100 border-b border-slate-200 text-center">Ingreso</th>
@@ -1649,13 +1648,12 @@ function Programacion({ scriptsLoaded, onHome }) {
                             </thead>
                             <tbody>
                                 {rowsToRender.length === 0 ? (
-                                    <tr><td colSpan={11} className="p-6 text-center text-slate-400 text-sm">Sin datos con los filtros actuales.</td></tr>
+                                    <tr><td colSpan={10} className="p-6 text-center text-slate-400 text-sm">Sin datos con los filtros actuales.</td></tr>
                                 ) : rowsToRender.map((r, i) => (
                                     <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
                                         <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.Dia || '—'}</td>
                                         <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.Ciudad || '—'}</td>
                                         <td className="p-3 text-sm font-semibold text-slate-700 whitespace-nowrap">{r.RutaGeneral || '—'}</td>
-                                        <td className="p-3 text-sm text-slate-700 whitespace-nowrap">{r.RouteName || '—'}</td>
                                         <td className="p-3 text-sm text-center text-slate-600">{r.Sequence !== '' ? r.Sequence : '—'}</td>
                                         <td className="p-3 text-sm text-slate-800">{r.Name || '—'}</td>
                                         <td className="p-3 text-sm text-center text-slate-600 whitespace-nowrap">{r.HoraIngreso || '—'}</td>
